@@ -1,0 +1,247 @@
+import { getDb } from '../db.js'
+import { logAudit } from './auditService.js'
+
+export interface DiscrepancyBatch {
+  id: number
+  batch_no: string
+  status: string
+  created_by: string
+  reviewed_by: string | null
+  approved_by: string | null
+  rolled_back_by: string | null
+  rollback_reason: string | null
+  created_at: string
+  reviewed_at: string | null
+  approved_at: string | null
+  rolled_back_at: string | null
+}
+
+export interface DiscrepancyLine {
+  id: number
+  batch_id: number
+  sku: string
+  name: string
+  book_qty: number
+  physical_qty: number
+  diff_qty: number
+  diff_type: string
+  unit: string
+  location: string
+}
+
+export interface DiscrepancyBatchWithLines extends DiscrepancyBatch {
+  lines: DiscrepancyLine[]
+}
+
+export interface DiscrepancyBatchWithCount extends DiscrepancyBatch {
+  line_count: number
+  surplus_count: number
+  shortage_count: number
+  missed_count: number
+}
+
+export function getDiscrepancyStats(): { surplus: number; shortage: number; missed: number } {
+  const db = getDb()
+  const row = db.prepare(
+    `SELECT
+      COALESCE(SUM(CASE WHEN diff_type = 'surplus' THEN 1 ELSE 0 END), 0) as surplus,
+      COALESCE(SUM(CASE WHEN diff_type = 'shortage' THEN 1 ELSE 0 END), 0) as shortage,
+      COALESCE(SUM(CASE WHEN diff_type = 'missed' THEN 1 ELSE 0 END), 0) as missed
+    FROM discrepancy_line`
+  ).get() as { surplus: number; shortage: number; missed: number }
+  return row
+}
+
+export function calculateDiscrepancy(createdBy: string): DiscrepancyBatchWithLines {
+  const db = getDb()
+
+  const bookRows = db.prepare(
+    `SELECT sku, name, quantity, unit, location FROM book_inventory`
+  ).all() as { sku: string; name: string; quantity: number; unit: string; location: string }[]
+
+  const physicalRows = db.prepare(
+    `SELECT sku, name, quantity, unit, location FROM physical_inventory`
+  ).all() as { sku: string; name: string; quantity: number; unit: string; location: string }[]
+
+  const bookMap = new Map<string, { name: string; quantity: number; unit: string; location: string }>()
+  for (const row of bookRows) {
+    const existing = bookMap.get(row.sku)
+    if (existing) {
+      existing.quantity += row.quantity
+    } else {
+      bookMap.set(row.sku, { name: row.name, quantity: row.quantity, unit: row.unit, location: row.location })
+    }
+  }
+
+  const physicalMap = new Map<string, { name: string; quantity: number; unit: string; location: string }>()
+  for (const row of physicalRows) {
+    const existing = physicalMap.get(row.sku)
+    if (existing) {
+      existing.quantity += row.quantity
+    } else {
+      physicalMap.set(row.sku, { name: row.name, quantity: row.quantity, unit: row.unit, location: row.location })
+    }
+  }
+
+  const allSkus = new Set([...bookMap.keys(), ...physicalMap.keys()])
+  const lines: Omit<DiscrepancyLine, 'id' | 'batch_id'>[] = []
+
+  for (const sku of allSkus) {
+    const book = bookMap.get(sku)
+    const physical = physicalMap.get(sku)
+
+    const bookQty = book ? book.quantity : 0
+    const physicalQty = physical ? physical.quantity : 0
+    const diffQty = physicalQty - bookQty
+
+    if (diffQty === 0) continue
+
+    let diffType: string
+    if (!physical) {
+      diffType = 'missed'
+    } else if (diffQty > 0) {
+      diffType = 'surplus'
+    } else {
+      diffType = 'shortage'
+    }
+
+    const name = book?.name || physical?.name || ''
+    const unit = book?.unit || physical?.unit || ''
+    const location = book?.location || physical?.location || ''
+
+    lines.push({ sku, name, book_qty: bookQty, physical_qty: physicalQty, diff_qty: diffQty, diff_type: diffType, unit, location })
+  }
+
+  const batchNo = 'DIFF-' + Date.now()
+
+  const result = db.transaction(() => {
+    const batchInfo = db.prepare(
+      `INSERT INTO discrepancy_batch (batch_no, status, created_by) VALUES (?, 'pending_review', ?)`
+    ).run(batchNo, createdBy)
+
+    const batchId = batchInfo.lastInsertRowid as number
+    const insertLine = db.prepare(
+      `INSERT INTO discrepancy_line (batch_id, sku, name, book_qty, physical_qty, diff_qty, diff_type, unit, location) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+
+    for (const line of lines) {
+      insertLine.run(batchId, line.sku, line.name, line.book_qty, line.physical_qty, line.diff_qty, line.diff_type, line.unit, line.location)
+    }
+
+    logAudit('calculate_discrepancy', 'discrepancy_batch', batchId, createdBy, `batch=${batchNo}, lines=${lines.length}`)
+
+    const batch = db.prepare('SELECT * FROM discrepancy_batch WHERE id = ?').get(batchId) as DiscrepancyBatch
+    const insertedLines = db.prepare('SELECT * FROM discrepancy_line WHERE batch_id = ?').all(batchId) as DiscrepancyLine[]
+
+    return { ...batch, lines: insertedLines }
+  })()
+
+  return result
+}
+
+export function getDiscrepancies(): DiscrepancyBatchWithCount[] {
+  const db = getDb()
+  return db.prepare(
+    `SELECT b.*,
+      COUNT(l.id) as line_count,
+      COALESCE(SUM(CASE WHEN l.diff_type = 'surplus' THEN 1 ELSE 0 END), 0) as surplus_count,
+      COALESCE(SUM(CASE WHEN l.diff_type = 'shortage' THEN 1 ELSE 0 END), 0) as shortage_count,
+      COALESCE(SUM(CASE WHEN l.diff_type = 'missed' THEN 1 ELSE 0 END), 0) as missed_count
+    FROM discrepancy_batch b
+    LEFT JOIN discrepancy_line l ON b.id = l.batch_id
+    GROUP BY b.id
+    ORDER BY b.created_at DESC`
+  ).all() as DiscrepancyBatchWithCount[]
+}
+
+export function getDiscrepancyById(id: number): DiscrepancyBatchWithLines | null {
+  const db = getDb()
+  const batch = db.prepare('SELECT * FROM discrepancy_batch WHERE id = ?').get(id) as DiscrepancyBatch | undefined
+  if (!batch) return null
+  const lines = db.prepare('SELECT * FROM discrepancy_line WHERE batch_id = ?').all(id) as DiscrepancyLine[]
+  return { ...batch, lines }
+}
+
+export function reviewDiscrepancy(id: number, reviewedBy: string, pass: boolean): DiscrepancyBatch | null {
+  const db = getDb()
+  const batch = db.prepare('SELECT * FROM discrepancy_batch WHERE id = ?').get(id) as DiscrepancyBatch | undefined
+  if (!batch) return null
+
+  if (pass) {
+    db.prepare(
+      `UPDATE discrepancy_batch SET reviewed_by = ?, reviewed_at = datetime('now'), status = 'reviewed' WHERE id = ?`
+    ).run(reviewedBy, id)
+    logAudit('review_discrepancy', 'discrepancy_batch', id, reviewedBy, `batch=${batch.batch_no}, pass=true`)
+  } else {
+    db.prepare(
+      `UPDATE discrepancy_batch SET reviewed_by = ?, reviewed_at = datetime('now') WHERE id = ?`
+    ).run(reviewedBy, id)
+    logAudit('review_discrepancy', 'discrepancy_batch', id, reviewedBy, `batch=${batch.batch_no}, pass=false (rejected)`)
+  }
+
+  return db.prepare('SELECT * FROM discrepancy_batch WHERE id = ?').get(id) as DiscrepancyBatch
+}
+
+export function approveDiscrepancy(id: number, approvedBy: string): DiscrepancyBatch | null {
+  const db = getDb()
+  const batch = db.prepare('SELECT * FROM discrepancy_batch WHERE id = ?').get(id) as DiscrepancyBatch | undefined
+  if (!batch) return null
+  if (batch.status !== 'reviewed') {
+    throw new Error('只有已审核的差异批次才能审批')
+  }
+
+  const transaction = db.transaction(() => {
+    db.prepare(
+      `UPDATE discrepancy_batch SET approved_by = ?, approved_at = datetime('now'), status = 'approved' WHERE id = ?`
+    ).run(approvedBy, id)
+
+    const lines = db.prepare('SELECT * FROM discrepancy_line WHERE batch_id = ?').all(id) as DiscrepancyLine[]
+    for (const line of lines) {
+      const existing = db.prepare('SELECT * FROM current_inventory WHERE sku = ?').get(line.sku) as { quantity: number } | undefined
+      if (existing) {
+        db.prepare('UPDATE current_inventory SET quantity = quantity + ? WHERE sku = ?').run(line.diff_qty, line.sku)
+      } else {
+        db.prepare(
+          `INSERT INTO current_inventory (sku, name, quantity, unit, location) VALUES (?, ?, ?, ?, ?)`
+        ).run(line.sku, line.name, line.diff_qty, line.unit, line.location)
+      }
+    }
+
+    logAudit('approve_discrepancy', 'discrepancy_batch', id, approvedBy, `batch=${batch.batch_no}, adjusted ${lines.length} items`)
+  })
+
+  transaction()
+  return db.prepare('SELECT * FROM discrepancy_batch WHERE id = ?').get(id) as DiscrepancyBatch
+}
+
+export function rollbackDiscrepancy(id: number, rolledBackBy: string, reason: string): DiscrepancyBatch | null {
+  const db = getDb()
+  const batch = db.prepare('SELECT * FROM discrepancy_batch WHERE id = ?').get(id) as DiscrepancyBatch | undefined
+  if (!batch) return null
+  if (batch.status !== 'approved') {
+    throw new Error('只有已审批的差异批次才能回滚')
+  }
+
+  const transaction = db.transaction(() => {
+    db.prepare(
+      `UPDATE discrepancy_batch SET rolled_back_by = ?, rolled_back_at = datetime('now'), status = 'rolled_back', rollback_reason = ? WHERE id = ?`
+    ).run(rolledBackBy, reason, id)
+
+    const lines = db.prepare('SELECT * FROM discrepancy_line WHERE batch_id = ?').all(id) as DiscrepancyLine[]
+    for (const line of lines) {
+      const existing = db.prepare('SELECT * FROM current_inventory WHERE sku = ?').get(line.sku) as { quantity: number } | undefined
+      if (existing) {
+        db.prepare('UPDATE current_inventory SET quantity = quantity - ? WHERE sku = ?').run(line.diff_qty, line.sku)
+      }
+    }
+
+    logAudit('rollback_discrepancy', 'discrepancy_batch', id, rolledBackBy, `batch=${batch.batch_no}, reason=${reason}`)
+  })
+
+  transaction()
+  return db.prepare('SELECT * FROM discrepancy_batch WHERE id = ?').get(id) as DiscrepancyBatch
+}
+
+export function exportDiscrepancy(id: number): DiscrepancyBatchWithLines | null {
+  return getDiscrepancyById(id)
+}

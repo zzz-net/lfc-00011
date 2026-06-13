@@ -1,0 +1,5 @@
+sku,name,quantity,unit,location,operator
+SKU001,螺丝M6,500,个,A-01,张三
+SKU002,螺母M6,450,个,A-01,张三
+SKU003,垫片M6,300,个,A-02,李四
+SKU005,六角螺栓M8,160,个,B-01,李四

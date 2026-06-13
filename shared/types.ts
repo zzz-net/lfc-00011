@@ -1,0 +1,83 @@
+export interface BookInventoryItem {
+  id?: number;
+  sku: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  location: string;
+  batch_no?: string;
+  imported_by?: string;
+  created_at?: string;
+}
+
+export interface PhysicalInventoryItem {
+  id?: number;
+  sku: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  location: string;
+  operator: string;
+  batch_no?: string;
+  imported_by?: string;
+  created_at?: string;
+}
+
+export interface DiscrepancyBatch {
+  id: number;
+  batch_no: string;
+  status: 'pending_review' | 'reviewed' | 'approved' | 'rolled_back';
+  created_by: string;
+  reviewed_by: string | null;
+  approved_by: string | null;
+  rolled_back_by: string | null;
+  rollback_reason: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+  approved_at: string | null;
+  rolled_back_at: string | null;
+  line_count?: number;
+}
+
+export interface DiscrepancyLine {
+  id: number;
+  batch_id: number;
+  sku: string;
+  name: string;
+  book_qty: number;
+  physical_qty: number;
+  diff_qty: number;
+  diff_type: 'surplus' | 'shortage' | 'missed';
+  unit: string;
+  location: string;
+}
+
+export interface DiscrepancyDetail {
+  batch: DiscrepancyBatch;
+  lines: DiscrepancyLine[];
+}
+
+export interface CurrentInventoryItem {
+  id: number;
+  sku: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  location: string;
+}
+
+export interface AuditLogEntry {
+  id: number;
+  action: string;
+  entity_type: string;
+  entity_id: number;
+  operator: string;
+  detail: string;
+  created_at: string;
+}
+
+export interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
