@@ -5,6 +5,7 @@ import type {
   DiscrepancyBatch,
   DiscrepancyDetail,
   AuditLogEntry,
+  InventoryAdjustment,
   ApiResponse,
 } from '@shared/types'
 
@@ -107,5 +108,10 @@ export async function getAuditLogs(
   pageSize: number = 20,
 ): Promise<ApiResponse<{ data: AuditLogEntry[]; total: number }>> {
   const res = await fetch(`/api/audit?page=${page}&pageSize=${pageSize}`)
+  return res.json()
+}
+
+export async function getAdjustments(batchId: number): Promise<ApiResponse<InventoryAdjustment[]>> {
+  const res = await fetch(`/api/discrepancies/${batchId}/adjustments`)
   return res.json()
 }

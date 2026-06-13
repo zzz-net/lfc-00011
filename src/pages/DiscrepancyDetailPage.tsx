@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { FileDown, ArrowLeft } from 'lucide-react'
+import { FileDown, ArrowLeft, TrendingUp, TrendingDown } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
-import { getDiscrepancyById, reviewDiscrepancy, approveDiscrepancy, rollbackDiscrepancy } from '@/api/client'
-import type { DiscrepancyDetail } from '@shared/types'
+import { getDiscrepancyById, reviewDiscrepancy, approveDiscrepancy, rollbackDiscrepancy, getAdjustments } from '@/api/client'
+import type { DiscrepancyDetail, InventoryAdjustment } from '@shared/types'
 
 const statusStyles: Record<string, string> = {
   pending_review: 'bg-amber-100 text-amber-700',
@@ -12,7 +12,7 @@ const statusStyles: Record<string, string> = {
   rolled_back: 'bg-red-100 text-red-700',
 }
 const statusLabels: Record<string, string> = {
-  pending_review: '待复核', reviewed: '已复核', approved: '已批准', rolled_back: '已回滚',
+  pending_review: '待复核', reviewed: '已复核', approved: '已批准', rolled_back: '已撤销',
 }
 const diffTypeStyles: Record<string, string> = {
   surplus: 'bg-green-100 text-green-700',
@@ -22,15 +22,23 @@ const diffTypeStyles: Record<string, string> = {
 const diffTypeLabels: Record<string, string> = {
   surplus: '盘盈', shortage: '盘亏', missed: '漏盘',
 }
+const adjTypeLabels: Record<string, string> = {
+  original: '原调整', compensation: '补偿',
+}
+const adjTypeStyles: Record<string, string> = {
+  original: 'bg-blue-100 text-blue-700',
+  compensation: 'bg-purple-100 text-purple-700',
+}
 
 export default function DiscrepancyDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { operator, addToast } = useAppStore()
   const [detail, setDetail] = useState<DiscrepancyDetail | null>(null)
+  const [adjustments, setAdjustments] = useState<InventoryAdjustment[]>([])
   const [loading, setLoading] = useState(false)
   const [rollbackReason, setRollbackReason] = useState('')
 
-  useEffect(() => { if (id) loadDetail() }, [id])
+  useEffect(() => { if (id) { loadDetail(); loadAdjustments() } }, [id])
 
   async function loadDetail() {
     setLoading(true)
@@ -42,6 +50,15 @@ export default function DiscrepancyDetailPage() {
       addToast('error', '网络错误')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function loadAdjustments() {
+    try {
+      const res = await getAdjustments(Number(id))
+      if (res.success && res.data) setAdjustments(res.data)
+    } catch {
+      // ignore
     }
   }
 
@@ -58,17 +75,17 @@ export default function DiscrepancyDetailPage() {
     if (!operator) { addToast('error', '请输入操作人'); return }
     try {
       const res = await approveDiscrepancy(Number(id), operator)
-      if (res.success) { addToast('success', '批准调整成功'); await loadDetail() }
+      if (res.success) { addToast('success', '批准调整成功'); await loadDetail(); await loadAdjustments() }
       else addToast('error', res.error || '操作失败')
     } catch { addToast('error', '网络错误') }
   }
 
   async function handleRollback() {
     if (!operator) { addToast('error', '请输入操作人'); return }
-    if (!rollbackReason.trim()) { addToast('error', '请输入回滚原因'); return }
+    if (!rollbackReason.trim()) { addToast('error', '请输入撤销原因'); return }
     try {
       const res = await rollbackDiscrepancy(Number(id), operator, rollbackReason)
-      if (res.success) { addToast('success', '回滚成功'); setRollbackReason(''); await loadDetail() }
+      if (res.success) { addToast('success', '撤销成功'); setRollbackReason(''); await loadDetail(); await loadAdjustments() }
       else addToast('error', res.error || '操作失败')
     } catch { addToast('error', '网络错误') }
   }
@@ -97,9 +114,18 @@ export default function DiscrepancyDetailPage() {
           <div><span className="text-slate-500">复核人：</span>{batch.reviewed_by || '-'}</div>
           <div><span className="text-slate-500">批准人：</span>{batch.approved_by || '-'}</div>
         </div>
+        {batch.status === 'rolled_back' && (
+          <div className="mt-3 text-sm">
+            <span className="text-slate-500">撤销人：</span>{batch.rolled_back_by}
+            <span className="ml-4 text-slate-500">撤销原因：</span>{batch.rollback_reason}
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-lg shadow overflow-hidden">
+        <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+          <h3 className="text-sm font-semibold text-slate-700">差异明细</h3>
+        </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200 text-slate-500">
@@ -138,6 +164,54 @@ export default function DiscrepancyDetailPage() {
         </table>
       </div>
 
+      {adjustments.length > 0 && (
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+            <h3 className="text-sm font-semibold text-slate-700">库存调整流水</h3>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                <th className="text-left py-3 px-4">流水号</th>
+                <th className="text-left py-3 px-4">SKU</th>
+                <th className="text-left py-3 px-4">名称</th>
+                <th className="text-left py-3 px-4">类型</th>
+                <th className="text-left py-3 px-4">方向</th>
+                <th className="text-right py-3 px-4">数量</th>
+                <th className="text-left py-3 px-4">操作人</th>
+                <th className="text-left py-3 px-4">原因</th>
+                <th className="text-left py-3 px-4">时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {adjustments.map((a) => (
+                <tr key={a.id} className="border-b border-slate-100 hover:bg-slate-50">
+                  <td className="py-2.5 px-4 font-mono text-xs">#{a.id}</td>
+                  <td className="py-2.5 px-4 font-mono text-xs">{a.sku}</td>
+                  <td className="py-2.5 px-4">{a.name}</td>
+                  <td className="py-2.5 px-4">
+                    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${adjTypeStyles[a.adjustment_type]}`}>
+                      {adjTypeLabels[a.adjustment_type]}
+                    </span>
+                  </td>
+                  <td className="py-2.5 px-4">
+                    {a.direction === 'increase' ? (
+                      <span className="inline-flex items-center gap-1 text-green-600"><TrendingUp className="w-3.5 h-3.5" /> 增加</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-red-600"><TrendingDown className="w-3.5 h-3.5" /> 减少</span>
+                    )}
+                  </td>
+                  <td className="py-2.5 px-4 text-right font-medium">{a.quantity}</td>
+                  <td className="py-2.5 px-4">{a.operator}</td>
+                  <td className="py-2.5 px-4 text-slate-500 max-w-[200px] truncate" title={a.reason}>{a.reason}</td>
+                  <td className="py-2.5 px-4 text-slate-500 text-xs">{a.created_at}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <div className="bg-white rounded-lg shadow p-6">
         <h3 className="text-sm font-semibold text-slate-700 mb-4">操作</h3>
         {batch.status === 'pending_review' && (
@@ -154,16 +228,16 @@ export default function DiscrepancyDetailPage() {
             <textarea
               value={rollbackReason}
               onChange={(e) => setRollbackReason(e.target.value)}
-              placeholder="请输入回滚原因"
+              placeholder="请输入撤销原因"
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-red-500 resize-none"
               rows={3}
             />
-            <button onClick={handleRollback} className="bg-red-600 hover:bg-red-700 text-white font-medium px-5 py-2 rounded-lg text-sm transition-colors">回滚调整</button>
+            <button onClick={handleRollback} className="bg-red-600 hover:bg-red-700 text-white font-medium px-5 py-2 rounded-lg text-sm transition-colors">撤销调整</button>
           </div>
         )}
         {batch.status === 'rolled_back' && (
           <div className="text-sm text-slate-600">
-            <span className="font-medium text-red-600">已回滚</span>
+            <span className="font-medium text-red-600">已撤销</span>
             {batch.rollback_reason && <span className="ml-2">原因：{batch.rollback_reason}</span>}
           </div>
         )}
@@ -175,7 +249,7 @@ export default function DiscrepancyDetailPage() {
         rel="noopener noreferrer"
         className="inline-flex items-center gap-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium px-4 py-2.5 rounded-lg transition-colors text-sm"
       >
-        <FileDown className="w-4 h-4" /> 导出差异报告
+        <FileDown className="w-4 h-4" /> 导出完整报告（含调整流水+审计日志）
       </a>
     </div>
   )

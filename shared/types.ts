@@ -76,6 +76,21 @@ export interface AuditLogEntry {
   created_at: string;
 }
 
+export interface InventoryAdjustment {
+  id: number;
+  batch_id: number;
+  line_id: number;
+  sku: string;
+  name: string;
+  direction: 'increase' | 'decrease';
+  quantity: number;
+  adjustment_type: 'original' | 'compensation';
+  related_adjustment_id: number | null;
+  operator: string;
+  reason: string;
+  created_at: string;
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;

@@ -98,11 +98,29 @@ function initTables(db: Database.Database): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS inventory_adjustment (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id INTEGER NOT NULL REFERENCES discrepancy_batch(id),
+      line_id INTEGER NOT NULL REFERENCES discrepancy_line(id),
+      sku TEXT NOT NULL,
+      name TEXT NOT NULL,
+      direction TEXT NOT NULL CHECK(direction IN ('increase','decrease')),
+      quantity INTEGER NOT NULL CHECK(quantity > 0),
+      adjustment_type TEXT NOT NULL CHECK(adjustment_type IN ('original','compensation')),
+      related_adjustment_id INTEGER DEFAULT NULL REFERENCES inventory_adjustment(id),
+      operator TEXT NOT NULL DEFAULT '',
+      reason TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_discrepancy_line_batch ON discrepancy_line(batch_id);
     CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity_id);
     CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at);
     CREATE INDEX IF NOT EXISTS idx_book_inventory_sku ON book_inventory(sku);
     CREATE INDEX IF NOT EXISTS idx_physical_inventory_sku ON physical_inventory(sku);
+    CREATE INDEX IF NOT EXISTS idx_inventory_adjustment_batch ON inventory_adjustment(batch_id);
+    CREATE INDEX IF NOT EXISTS idx_inventory_adjustment_sku ON inventory_adjustment(sku);
+    CREATE INDEX IF NOT EXISTS idx_inventory_adjustment_created ON inventory_adjustment(created_at);
   `)
 }
 

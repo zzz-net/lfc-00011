@@ -1,57 +1,376 @@
-# React + TypeScript + Vite
+# 库存盘点系统
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+一个基于 React + Express + SQLite 的库存盘点管理系统，支持账面库存与实物盘点对比、差异审批、库存调整、撤销补偿和完整审计追溯。
 
-Currently, two official plugins are available:
+## 功能特性
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- 📦 **账面库存导入**：批量导入系统账面库存数据
+- 📋 **实物盘点导入**：导入实际盘点结果，自动校验负数
+- 🔍 **差异自动计算**：自动对比账面与实盘，生成差异批次
+- ✅ **两级审批**：复核 → 批准的审批流程
+- ↩️ **撤销与补偿流水**：已批准的调整可撤销，自动生成独立补偿流水
+- 📊 **库存重算**：批准/撤销后自动重算当前库存
+- 📝 **审计日志**：所有操作均有完整审计记录
+- 📥 **完整导出**：导出包含批次信息、差异明细、调整流水、审计日志的完整报告
 
-## Expanding the ESLint configuration
+## 技术栈
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- **前端**：React 18 + TypeScript + Vite + Tailwind CSS + Zustand
+- **后端**：Express.js + TypeScript
+- **数据库**：SQLite (better-sqlite3)
+- **文件处理**：Multer + PapaParse
 
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+## 本地启动
+
+### 前置要求
+
+- Node.js >= 18
+- npm 或 yarn
+
+### 安装依赖
+
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### 启动开发环境
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+```bash
+npm run dev
+```
 
-export default tseslint.config({
-  extends: [
-    // other configs...
-    // Enable lint rules for React
-    reactX.configs['recommended-typescript'],
-    // Enable lint rules for React DOM
-    reactDom.configs.recommended,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+该命令会同时启动：
+- 前端开发服务器：http://localhost:5173
+- 后端 API 服务器：http://localhost:3001
+
+### 单独启动
+
+```bash
+# 仅启动前端
+npm run client:dev
+
+# 仅启动后端
+npm run server:dev
+```
+
+### 构建生产版本
+
+```bash
+npm run build
+```
+
+## 样例 CSV 字段说明
+
+系统提供了 3 个样例 CSV 文件，位于 `samples/` 目录：
+
+### 1. 账面库存 (`book_inventory.csv`)
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| sku | string | 是 | 商品编码，唯一标识 |
+| name | string | 是 | 商品名称 |
+| quantity | integer | 是 | 账面数量，必须 >= 0 |
+| unit | string | 否 | 计量单位（个、箱、件等） |
+| location | string | 否 | 存放库位 |
+
+### 2. 实物盘点 (`physical_inventory.csv`)
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| sku | string | 是 | 商品编码 |
+| name | string | 是 | 商品名称 |
+| quantity | integer | 是 | 实盘数量，必须 >= 0 |
+| unit | string | 否 | 计量单位 |
+| location | string | 否 | 存放库位 |
+| operator | string | 否 | 盘点人 |
+
+### 3. 负数实盘样例 (`physical_inventory_negative.csv`)
+
+用于测试负数校验的错误样例，包含一条数量为 -5 的记录。
+
+## 操作流程
+
+### 导入顺序
+
+**必须先导入账面库存，再导入实物盘点**，最后计算差异。
+
+```
+账面库存导入 → 实物盘点导入 → 计算差异 → 复核 → 批准（调整库存） → （可选）撤销
+```
+
+### 详细步骤
+
+#### 步骤 1：导入账面库存
+
+1. 进入「库存导入」页面
+2. 选择「账面库存」标签
+3. 上传 `samples/book_inventory.csv`
+4. 填写操作人姓名
+5. 点击「导入」
+
+导入后，系统会：
+- 清空原有账面库存数据
+- 写入新的账面库存记录
+- 同步更新当前库存表
+
+#### 步骤 2：导入实物盘点
+
+1. 选择「实物盘点」标签
+2. 上传 `samples/physical_inventory.csv`
+3. 填写操作人姓名
+4. 点击「导入」
+
+导入后，系统会清空原有实物盘点数据并写入新数据。
+
+##### 负数实盘报错
+
+如果实盘 CSV 中包含负数数量（如 `physical_inventory_negative.csv`），系统会直接报错并拒绝导入：
+
+```
+实物盘点数量不能为负数: SKU=SKU002, 数量=-5
+```
+
+##### 缺失实盘按零盘点
+
+如果账面库存中的某个 SKU 在实物盘点中不存在（即漏盘），系统会将其实盘数量视为 0 进行对比，差异类型标记为「漏盘」。
+
+#### 步骤 3：计算差异
+
+1. 进入「差异盘点」页面
+2. 点击「计算差异」按钮
+3. 填写操作人，确认创建差异批次
+
+系统会自动对比账面与实盘数据，生成差异批次，包含：
+- **盘盈 (surplus)**：实盘数量 > 账面数量
+- **盘亏 (shortage)**：实盘数量 < 账面数量
+- **漏盘 (missed)**：账面有但实盘没有（实盘按 0 计算）
+
+#### 步骤 4：复核差异
+
+1. 点击差异批次进入详情页
+2. 查看差异明细
+3. 点击「复核通过」或「复核驳回」
+
+#### 步骤 5：批准调整
+
+1. 复核通过后，点击「批准调整」
+2. 确认后系统会：
+   - 将批次状态更新为「已批准」
+   - 生成**原调整流水**（每条差异对应一条）
+   - 按差异数量调整当前库存
+   - 记录审计日志
+
+#### 步骤 6：撤销批准（生成补偿流水）
+
+如果已批准的调整有误，可以撤销：
+
+1. 在已批准的批次详情页
+2. 填写撤销原因
+3. 点击「撤销调整」
+
+撤销后系统会：
+- 将批次状态更新为「已撤销」
+- 生成**补偿流水**（每条原调整对应一条反向补偿）
+  - 记录原批次、货品、方向、数量、操作人、时间、原因
+  - `related_adjustment_id` 关联对应的原调整流水
+  - `adjustment_type` 标记为 `compensation`
+- 按补偿结果**重算当前库存**
+- 记录撤销审计日志
+
+**重要**：撤销不是简单的状态变更，而是生成独立的补偿流水记录，确保每一次库存变动都有据可查。
+
+#### 步骤 7：导出完整报告
+
+在差异批次详情页，点击「导出完整报告」按钮，下载的 CSV 报告包含 4 个部分：
+
+1. **批次状态概览**：当前状态、各节点操作人、时间、撤销原因等
+2. **批次信息**：批次表原始数据
+3. **差异明细**：所有差异行的详细数据
+4. **库存调整流水**：原调整 + 补偿的完整流水记录
+5. **审计日志**：该批次相关的所有操作审计记录
+
+通过这份报告，可以完整追溯一条盘亏从批准到撤销的全过程。
+
+## 数据模型
+
+### 核心表结构
+
+#### `book_inventory` - 账面库存
+#### `physical_inventory` - 实物盘点
+#### `current_inventory` - 当前库存（实时）
+#### `discrepancy_batch` - 差异批次
+#### `discrepancy_line` - 差异明细行
+#### `inventory_adjustment` - 库存调整流水（新增）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER | 主键 |
+| batch_id | INTEGER | 关联差异批次 |
+| line_id | INTEGER | 关联差异明细行 |
+| sku | TEXT | 商品编码 |
+| name | TEXT | 商品名称 |
+| direction | TEXT | 方向：increase / decrease |
+| quantity | INTEGER | 变动数量（正数） |
+| adjustment_type | TEXT | 类型：original（原调整）/ compensation（补偿） |
+| related_adjustment_id | INTEGER | 关联的原调整ID（补偿流水使用） |
+| operator | TEXT | 操作人 |
+| reason | TEXT | 原因 |
+| created_at | TEXT | 创建时间 |
+
+#### `audit_log` - 审计日志
+
+## 完整验收流程
+
+按照以下步骤可以完整验证系统功能：
+
+### 验收清单
+
+- [ ] 1. 导入账面库存成功
+- [ ] 2. 导入实物盘点成功
+- [ ] 3. 负数实盘导入报错
+- [ ] 4. 计算差异，盘盈/盘亏/漏盘分类正确
+- [ ] 5. 缺失实盘按零盘点（漏盘）
+- [ ] 6. 复核通过
+- [ ] 7. 批准调整，库存正确更新
+- [ ] 8. 生成原调整流水
+- [ ] 9. 撤销批准，填写原因
+- [ ] 10. 生成补偿流水，关联原调整
+- [ ] 11. 撤销后库存重算正确
+- [ ] 12. 导出报告包含所有 4 部分数据
+- [ ] 13. 重启服务后数据不丢失
+- [ ] 14. 重启后导出报告与重启前一致
+- [ ] 15. 审计日志完整记录所有操作
+
+### 操作步骤
+
+#### 第一阶段：导入与计算
+
+1. 启动服务：`npm run dev`
+2. 浏览器打开 http://localhost:5173
+3. 进入「库存导入」→「账面库存」
+4. 上传 `samples/book_inventory.csv`，操作人填「测试员A」，导入
+5. 切换到「实物盘点」，上传 `samples/physical_inventory.csv`，操作人填「盘点员B」，导入
+6. **验证**：当前库存与账面库存一致
+
+#### 第二阶段：负数校验
+
+7. 再次上传 `samples/physical_inventory_negative.csv`
+8. **验证**：系统提示「实物盘点数量不能为负数」，导入失败
+
+#### 第三阶段：差异计算与审批
+
+9. 进入「差异盘点」页面，点击「计算差异」，操作人填「主管C」
+10. 点击进入新生成的差异批次
+11. **验证**：差异明细中包含盘盈、盘亏、漏盘三种类型
+    - SKU002 盘亏（账面480，实盘450，差-30）
+    - SKU005 盘盈（账面150，实盘160，差+10）
+    - SKU004 漏盘（账面有，实盘没有）
+    - SKU006 漏盘
+12. 点击「复核通过」
+13. 点击「批准调整」
+14. **验证**：
+    - 批次状态变为「已批准」
+    - 出现「库存调整流水」表格
+    - 每条差异对应一条「原调整」流水
+    - 当前库存数量已调整（可在「库存导出」页面查看）
+
+#### 第四阶段：撤销与补偿
+
+15. 在已批准的批次详情页，填写撤销原因「盘点数据有误，重新盘点」
+16. 点击「撤销调整」
+17. **验证**：
+    - 批次状态变为「已撤销」
+    - 显示撤销人和撤销原因
+    - 库存调整流水表中新增「补偿」类型的流水
+    - 补偿流水方向与原调整相反
+    - 补偿流水的 `related_adjustment_id` 指向原调整
+    - 当前库存恢复到批准前的数量
+
+#### 第五阶段：导出验证
+
+18. 点击「导出完整报告」
+19. 打开下载的 CSV 文件
+20. **验证**：报告包含 5 个部分
+    - 批次状态概览
+    - 1. 批次信息
+    - 2. 差异明细
+    - 3. 库存调整流水（原调整 + 补偿）
+    - 4. 审计日志
+
+#### 第六阶段：重启验证
+
+21. 记录当前批次号、库存数量、调整流水数量
+22. 停止服务（Ctrl+C）
+23. 重新启动：`npm run dev`
+24. 刷新页面，进入「差异盘点」
+25. **验证**：
+    - 之前的差异批次仍然存在
+    - 批次状态仍然是「已撤销」
+    - 调整流水记录完整
+    - 当前库存数量与重启前一致
+26. 再次导出报告
+27. **验证**：导出内容与重启前完全一致
+
+#### 第七阶段：审计日志
+
+28. 进入「审计日志」页面
+29. **验证**：可以看到所有操作的完整记录，包括：
+    - 导入账面库存
+    - 导入实物盘点
+    - 计算差异
+    - 复核差异
+    - 批准差异
+    - 回滚/撤销差异
+
+## 数据库文件
+
+SQLite 数据库文件位于 `data/inventory.db`，包含所有业务数据。删除该文件可重置系统。
+
+## API 接口
+
+### 库存相关
+
+- `POST /api/inventory/book` - 导入账面库存
+- `POST /api/inventory/physical` - 导入实物盘点
+- `GET /api/inventory/book` - 获取账面库存列表
+- `GET /api/inventory/physical` - 获取实物盘点列表
+- `GET /api/inventory/current` - 获取当前库存列表
+- `GET /api/inventory/export` - 导出当前库存 CSV
+
+### 差异相关
+
+- `POST /api/discrepancies/calculate` - 计算差异
+- `GET /api/discrepancies` - 获取差异批次列表
+- `GET /api/discrepancies/:id` - 获取差异批次详情
+- `PUT /api/discrepancies/:id/review` - 复核差异
+- `PUT /api/discrepancies/:id/approve` - 批准差异
+- `PUT /api/discrepancies/:id/rollback` - 撤销差异
+- `GET /api/discrepancies/:id/adjustments` - 获取调整流水
+- `GET /api/discrepancies/:id/export` - 导出完整报告 CSV
+
+### 审计相关
+
+- `GET /api/audit` - 获取审计日志（分页）
+- `GET /api/audit/export` - 导出审计日志 CSV
+
+## 目录结构
+
+```
+lfc-00011/
+├── api/                    # 后端代码
+│   ├── routes/             # 路由层
+│   ├── services/           # 业务逻辑层
+│   ├── app.ts              # Express 应用
+│   ├── db.ts               # 数据库初始化
+│   └── index.ts            # 入口文件
+├── src/                    # 前端代码
+│   ├── pages/              # 页面组件
+│   ├── components/         # 通用组件
+│   ├── store/              # 状态管理
+│   ├── api/                # API 客户端
+│   └── ...
+├── shared/                 # 共享类型定义
+├── samples/                # 样例 CSV 文件
+├── data/                   # SQLite 数据库文件
+└── README.md               # 本文件
 ```

@@ -196,7 +196,15 @@ export function approveDiscrepancy(id: number, approvedBy: string): DiscrepancyB
     ).run(approvedBy, id)
 
     const lines = db.prepare('SELECT * FROM discrepancy_line WHERE batch_id = ?').all(id) as DiscrepancyLine[]
+    const insertAdjustment = db.prepare(
+      `INSERT INTO inventory_adjustment (batch_id, line_id, sku, name, direction, quantity, adjustment_type, operator, reason) VALUES (?, ?, ?, ?, ?, ?, 'original', ?, '审批通过，调整库存')`
+    )
+
     for (const line of lines) {
+      const direction = line.diff_qty > 0 ? 'increase' : 'decrease'
+      const absQty = Math.abs(line.diff_qty)
+      insertAdjustment.run(id, line.id, line.sku, line.name, direction, absQty, approvedBy)
+
       const existing = db.prepare('SELECT * FROM current_inventory WHERE sku = ?').get(line.sku) as { quantity: number } | undefined
       if (existing) {
         db.prepare('UPDATE current_inventory SET quantity = quantity + ? WHERE sku = ?').run(line.diff_qty, line.sku)
@@ -227,21 +235,88 @@ export function rollbackDiscrepancy(id: number, rolledBackBy: string, reason: st
       `UPDATE discrepancy_batch SET rolled_back_by = ?, rolled_back_at = datetime('now'), status = 'rolled_back', rollback_reason = ? WHERE id = ?`
     ).run(rolledBackBy, reason, id)
 
-    const lines = db.prepare('SELECT * FROM discrepancy_line WHERE batch_id = ?').all(id) as DiscrepancyLine[]
-    for (const line of lines) {
-      const existing = db.prepare('SELECT * FROM current_inventory WHERE sku = ?').get(line.sku) as { quantity: number } | undefined
+    const originalAdjustments = db.prepare(
+      `SELECT * FROM inventory_adjustment WHERE batch_id = ? AND adjustment_type = 'original'`
+    ).all(id) as { id: number; line_id: number; sku: string; name: string; direction: string; quantity: number }[]
+
+    const insertAdjustment = db.prepare(
+      `INSERT INTO inventory_adjustment (batch_id, line_id, sku, name, direction, quantity, adjustment_type, related_adjustment_id, operator, reason) VALUES (?, ?, ?, ?, ?, ?, 'compensation', ?, ?, ?)`
+    )
+
+    for (const adj of originalAdjustments) {
+      const compDirection = adj.direction === 'increase' ? 'decrease' : 'increase'
+      insertAdjustment.run(id, adj.line_id, adj.sku, adj.name, compDirection, adj.quantity, adj.id, rolledBackBy, reason)
+
+      const existing = db.prepare('SELECT * FROM current_inventory WHERE sku = ?').get(adj.sku) as { quantity: number } | undefined
       if (existing) {
-        db.prepare('UPDATE current_inventory SET quantity = quantity - ? WHERE sku = ?').run(line.diff_qty, line.sku)
+        const delta = adj.direction === 'increase' ? -adj.quantity : adj.quantity
+        db.prepare('UPDATE current_inventory SET quantity = quantity + ? WHERE sku = ?').run(delta, adj.sku)
       }
     }
 
-    logAudit('rollback_discrepancy', 'discrepancy_batch', id, rolledBackBy, `batch=${batch.batch_no}, reason=${reason}`)
+    logAudit('rollback_discrepancy', 'discrepancy_batch', id, rolledBackBy, `batch=${batch.batch_no}, reason=${reason}, compensations=${originalAdjustments.length}`)
   })
 
   transaction()
   return db.prepare('SELECT * FROM discrepancy_batch WHERE id = ?').get(id) as DiscrepancyBatch
 }
 
-export function exportDiscrepancy(id: number): DiscrepancyBatchWithLines | null {
-  return getDiscrepancyById(id)
+export interface InventoryAdjustment {
+  id: number
+  batch_id: number
+  line_id: number
+  sku: string
+  name: string
+  direction: 'increase' | 'decrease'
+  quantity: number
+  adjustment_type: 'original' | 'compensation'
+  related_adjustment_id: number | null
+  operator: string
+  reason: string
+  created_at: string
+}
+
+export interface AuditLogEntry {
+  id: number
+  action: string
+  entity_type: string
+  entity_id: number
+  operator: string
+  detail: string
+  created_at: string
+}
+
+export interface FullDiscrepancyExport {
+  batch: DiscrepancyBatch
+  lines: DiscrepancyLine[]
+  adjustments: InventoryAdjustment[]
+  auditLogs: AuditLogEntry[]
+}
+
+export function getAdjustmentsByBatch(batchId: number): InventoryAdjustment[] {
+  const db = getDb()
+  return db.prepare(
+    `SELECT * FROM inventory_adjustment WHERE batch_id = ? ORDER BY created_at ASC, id ASC`
+  ).all(batchId) as InventoryAdjustment[]
+}
+
+export function exportDiscrepancy(id: number): FullDiscrepancyExport | null {
+  const batch = getDiscrepancyById(id)
+  if (!batch) return null
+
+  const db = getDb()
+  const adjustments = db.prepare(
+    `SELECT * FROM inventory_adjustment WHERE batch_id = ? ORDER BY created_at ASC, id ASC`
+  ).all(id) as InventoryAdjustment[]
+
+  const auditLogs = db.prepare(
+    `SELECT * FROM audit_log WHERE entity_type = 'discrepancy_batch' AND entity_id = ? ORDER BY created_at ASC, id ASC`
+  ).all(id) as AuditLogEntry[]
+
+  return {
+    batch: batch as DiscrepancyBatch,
+    lines: batch.lines,
+    adjustments,
+    auditLogs,
+  }
 }
