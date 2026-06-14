@@ -6,6 +6,9 @@ import DiscrepancyListPage from '@/pages/DiscrepancyListPage'
 import DiscrepancyDetailPage from '@/pages/DiscrepancyDetailPage'
 import AuditPage from '@/pages/AuditPage'
 import ExportPage from '@/pages/ExportPage'
+import PlanListPage from '@/pages/PlanListPage'
+import PlanDetailPage from '@/pages/PlanDetailPage'
+import PlanFormPage from '@/pages/PlanFormPage'
 
 export default function App() {
   return (
@@ -17,6 +20,10 @@ export default function App() {
           <Route path="/import" element={<ImportPage />} />
           <Route path="/discrepancies" element={<DiscrepancyListPage />} />
           <Route path="/discrepancy/:id" element={<DiscrepancyDetailPage />} />
+          <Route path="/plans" element={<PlanListPage />} />
+          <Route path="/plans/new" element={<PlanFormPage />} />
+          <Route path="/plans/:id" element={<PlanDetailPage />} />
+          <Route path="/plans/:id/edit" element={<PlanFormPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/export" element={<ExportPage />} />
         </Route>

@@ -159,6 +159,55 @@ function initTables(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_disposition_history_line ON disposition_history(line_id);
     CREATE INDEX IF NOT EXISTS idx_disposition_history_batch ON disposition_history(batch_id);
     CREATE INDEX IF NOT EXISTS idx_disposition_history_created ON disposition_history(created_at);
+
+    CREATE TABLE IF NOT EXISTS stocktake_plan (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      plan_no TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      warehouse TEXT NOT NULL DEFAULT 'default',
+      scope_type TEXT NOT NULL DEFAULT 'all' CHECK(scope_type IN ('all','by_category')),
+      category TEXT DEFAULT NULL,
+      plan_date TEXT NOT NULL,
+      plan_end_date TEXT DEFAULT NULL,
+      responsible_person TEXT NOT NULL DEFAULT '',
+      executor TEXT DEFAULT NULL,
+      recurrence_type TEXT NOT NULL DEFAULT 'once' CHECK(recurrence_type IN ('once','weekly','monthly')),
+      recurrence_value TEXT DEFAULT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','in_progress','completed','cancelled')),
+      created_by TEXT NOT NULL DEFAULT '',
+      started_by TEXT DEFAULT NULL,
+      completed_by TEXT DEFAULT NULL,
+      cancelled_by TEXT DEFAULT NULL,
+      cancel_reason TEXT DEFAULT NULL,
+      remark TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      started_at TEXT DEFAULT NULL,
+      completed_at TEXT DEFAULT NULL,
+      cancelled_at TEXT DEFAULT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS stocktake_plan_import (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      plan_id INTEGER NOT NULL REFERENCES stocktake_plan(id),
+      import_type TEXT NOT NULL CHECK(import_type IN ('book','physical')),
+      batch_no TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS stocktake_plan_discrepancy (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      plan_id INTEGER NOT NULL REFERENCES stocktake_plan(id),
+      batch_id INTEGER NOT NULL REFERENCES discrepancy_batch(id),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_stocktake_plan_warehouse ON stocktake_plan(warehouse);
+    CREATE INDEX IF NOT EXISTS idx_stocktake_plan_status ON stocktake_plan(status);
+    CREATE INDEX IF NOT EXISTS idx_stocktake_plan_date ON stocktake_plan(plan_date);
+    CREATE INDEX IF NOT EXISTS idx_stocktake_plan_import_plan ON stocktake_plan_import(plan_id);
+    CREATE INDEX IF NOT EXISTS idx_stocktake_plan_discrepancy_plan ON stocktake_plan_discrepancy(plan_id);
+    CREATE INDEX IF NOT EXISTS idx_stocktake_plan_discrepancy_batch ON stocktake_plan_discrepancy(batch_id);
   `)
 }
 

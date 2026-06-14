@@ -133,6 +133,47 @@ export interface ApiResponse<T> {
   warning?: string;
 }
 
+export type PlanStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
+export type PlanScopeType = 'all' | 'by_category';
+export type PlanRecurrenceType = 'once' | 'weekly' | 'monthly';
+
+export interface StocktakePlan {
+  id: number;
+  plan_no: string;
+  name: string;
+  warehouse: string;
+  scope_type: PlanScopeType;
+  category?: string | null;
+  plan_date: string;
+  plan_end_date?: string | null;
+  responsible_person: string;
+  executor?: string | null;
+  recurrence_type: PlanRecurrenceType;
+  recurrence_value?: string | null;
+  status: PlanStatus;
+  created_by: string;
+  started_by?: string | null;
+  completed_by?: string | null;
+  cancelled_by?: string | null;
+  cancel_reason?: string | null;
+  remark?: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  cancelled_at?: string | null;
+}
+
+export interface PlanSummary {
+  plan: StocktakePlan;
+  importCount: number;
+  discrepancyBatchCount: number;
+  totalDiffLines: number;
+  diffAmount: number;
+  dispositionProgress: number;
+  approvalRate: number;
+}
+
 export interface DashboardStats {
   diffAmountDistribution: {
     surplus: { count: number; totalAbsQty: number }

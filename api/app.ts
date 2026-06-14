@@ -16,6 +16,7 @@ import inventoryRoutes from './routes/inventory.js'
 import discrepancyRoutes from './routes/discrepancy.js'
 import dispositionRoutes from './routes/disposition.js'
 import auditRoutes from './routes/audit.js'
+import planRoutes from './routes/plan.js'
 
 // for esm mode
 const __filename = fileURLToPath(import.meta.url)
@@ -38,6 +39,7 @@ app.use('/api/inventory', inventoryRoutes)
 app.use('/api/discrepancies', discrepancyRoutes)
 app.use('/api/dispositions', dispositionRoutes)
 app.use('/api/audit', auditRoutes)
+app.use('/api/plans', planRoutes)
 
 /**
  * health

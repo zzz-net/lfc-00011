@@ -12,6 +12,10 @@ import type {
   UserRoleType,
   ApiResponse,
   DashboardStats,
+  StocktakePlan,
+  PlanStatus,
+  PlanScopeType,
+  PlanRecurrenceType,
 } from '@shared/types'
 
 export async function importBookInventory(
@@ -214,5 +218,163 @@ export async function setUserRole(
 
 export async function getDashboardStats(): Promise<ApiResponse<DashboardStats>> {
   const res = await fetch('/api/discrepancies/dashboard/stats')
+  return res.json()
+}
+
+export async function createPlan(params: {
+  name: string
+  warehouse?: string
+  scopeType: PlanScopeType
+  category?: string | null
+  planDate: string
+  planEndDate?: string | null
+  responsiblePerson: string
+  executor?: string | null
+  recurrenceType: PlanRecurrenceType
+  recurrenceValue?: string | null
+  remark?: string | null
+  createdBy: string
+}): Promise<ApiResponse<StocktakePlan>> {
+  const res = await fetch('/api/plans', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  return res.json()
+}
+
+export async function getPlans(filters?: {
+  status?: PlanStatus
+  warehouse?: string
+  createdBy?: string
+  executor?: string
+  page?: number
+  pageSize?: number
+}): Promise<ApiResponse<{ data: StocktakePlan[]; total: number }>> {
+  const params = new URLSearchParams()
+  if (filters?.status) params.set('status', filters.status)
+  if (filters?.warehouse) params.set('warehouse', filters.warehouse)
+  if (filters?.createdBy) params.set('createdBy', filters.createdBy)
+  if (filters?.executor) params.set('executor', filters.executor)
+  if (filters?.page) params.set('page', String(filters.page))
+  if (filters?.pageSize) params.set('pageSize', String(filters.pageSize))
+  const res = await fetch(`/api/plans?${params.toString()}`)
+  return res.json()
+}
+
+export async function getPlanById(id: number): Promise<ApiResponse<StocktakePlan>> {
+  const res = await fetch(`/api/plans/${id}`)
+  return res.json()
+}
+
+export async function updatePlan(
+  id: number,
+  params: {
+    name?: string
+    scopeType?: PlanScopeType
+    category?: string | null
+    planDate?: string
+    planEndDate?: string | null
+    responsiblePerson?: string
+    executor?: string | null
+    recurrenceType?: PlanRecurrenceType
+    recurrenceValue?: string | null
+    remark?: string | null
+    operator: string
+  }
+): Promise<ApiResponse<StocktakePlan>> {
+  const res = await fetch(`/api/plans/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  return res.json()
+}
+
+export async function startPlan(id: number, operator: string): Promise<ApiResponse<StocktakePlan>> {
+  const res = await fetch(`/api/plans/${id}/start`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ operator }),
+  })
+  return res.json()
+}
+
+export async function completePlan(id: number, operator: string): Promise<ApiResponse<StocktakePlan>> {
+  const res = await fetch(`/api/plans/${id}/complete`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ operator }),
+  })
+  return res.json()
+}
+
+export async function cancelPlan(id: number, operator: string, reason: string): Promise<ApiResponse<StocktakePlan>> {
+  const res = await fetch(`/api/plans/${id}/cancel`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ operator, reason }),
+  })
+  return res.json()
+}
+
+export async function deletePlan(id: number, operator: string): Promise<ApiResponse<void>> {
+  const res = await fetch(`/api/plans/${id}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ operator }),
+  })
+  return res.json()
+}
+
+export async function getPlanSummary(id: number): Promise<ApiResponse<{
+  plan: StocktakePlan
+  importCount: number
+  discrepancyBatchCount: number
+  totalDiffLines: number
+  diffAmount: number
+  dispositionProgress: number
+  approvalRate: number
+  importBatches: Array<{ id: number; plan_id: number; import_type: string; batch_no: string; created_at: string }>
+  discrepancyBatches: Array<{ id: number; batch_no: string; status: string }>
+}>> {
+  const res = await fetch(`/api/plans/${id}/summary`)
+  return res.json()
+}
+
+export async function checkPlanPermission(
+  id: number,
+  operator: string
+): Promise<ApiResponse<{ canEdit: boolean; canExecute: boolean }>> {
+  const res = await fetch(`/api/plans/${id}/check-permission`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ operator }),
+  })
+  return res.json()
+}
+
+export async function linkImportToPlan(
+  planId: number,
+  importType: 'book' | 'physical',
+  batchNo: string
+): Promise<ApiResponse<void>> {
+  const res = await fetch(`/api/plans/${planId}/link-import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ importType, batchNo }),
+  })
+  return res.json()
+}
+
+export async function linkDiscrepancyToPlan(
+  planId: number,
+  batchId: number
+): Promise<ApiResponse<void>> {
+  const res = await fetch(`/api/plans/${planId}/link-discrepancy`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batchId }),
+  })
   return res.json()
 }

@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { Warehouse, Upload, ClipboardList, ScrollText, Download, X, Shield, LayoutDashboard } from 'lucide-react'
+import { Warehouse, Upload, ClipboardList, ScrollText, Download, X, Shield, LayoutDashboard, CalendarClock } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import { useState, useEffect } from 'react'
 import { getUserRole, setUserRole } from '@/api/client'
@@ -7,6 +7,7 @@ import type { UserRoleType } from '@shared/types'
 
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: '仪表盘' },
+  { to: '/plans', icon: CalendarClock, label: '盘点计划' },
   { to: '/import', icon: Upload, label: '数据导入' },
   { to: '/discrepancies', icon: ClipboardList, label: '差异管理' },
   { to: '/audit', icon: ScrollText, label: '审计记录' },
