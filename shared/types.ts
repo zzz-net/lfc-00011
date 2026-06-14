@@ -50,6 +50,40 @@ export interface DiscrepancyLine {
   diff_type: 'surplus' | 'shortage' | 'missed';
   unit: string;
   location: string;
+  disposition?: Disposition;
+}
+
+export type DispositionStatus = 'pending' | 'accepted_loss' | 'adjusted' | 'recounted';
+
+export interface Disposition {
+  id: number;
+  line_id: number;
+  batch_id: number;
+  status: DispositionStatus;
+  remark: string;
+  handler: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DispositionHistoryEntry {
+  id: number;
+  line_id: number;
+  batch_id: number;
+  from_status: DispositionStatus;
+  to_status: DispositionStatus;
+  remark: string;
+  handler: string;
+  operator: string;
+  created_at: string;
+}
+
+export type UserRoleType = 'approver' | 'handler' | 'admin';
+
+export interface UserRole {
+  id: number;
+  username: string;
+  role: UserRoleType;
 }
 
 export interface DiscrepancyDetail {

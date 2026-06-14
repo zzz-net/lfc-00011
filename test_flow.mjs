@@ -190,8 +190,105 @@ async function main() {
     console.log(`  SKU004 库存正确: ${sku004Correct ? '✓' : '✗'}`)
     console.log(`  SKU006 库存正确: ${sku006Correct ? '✓' : '✗'}`)
 
-    // 10. 撤销批准
-    log('10. 撤销批准（生成补偿流水）')
+    // 10. 差异处置模块测试
+    log('10. 差异处置模块测试')
+
+    log('  10.1 设置用户角色')
+    const handlerUser = 'test_handler'
+    const approverUser = 'test_approver'
+
+    const setHandlerRole = await apiJson('POST', '/auth/role', { username: handlerUser, role: 'handler' })
+    console.log(`    设置处置人角色: ${setHandlerRole?.role === 'handler' ? '✓' : '✗'}`)
+
+    const setApproverRole = await apiJson('POST', '/auth/role', { username: approverUser, role: 'approver' })
+    console.log(`    设置审批人角色: ${setApproverRole?.role === 'approver' ? '✓' : '✗'}`)
+
+    const getHandlerRole = await apiJson('GET', `/auth/role?username=${handlerUser}`)
+    console.log(`    查询处置人角色: ${getHandlerRole?.role === 'handler' ? '✓' : '✗'}`)
+
+    log('  10.2 处置权限校验')
+    const approverPerm = await apiJson('POST', '/dispositions/check-permission', { operator: approverUser, batchId })
+    console.log(`    审批人无处置权限: ${!approverPerm?.allowed ? '✓' : '✗'}`)
+
+    const handlerPerm = await apiJson('POST', '/dispositions/check-permission', { operator: handlerUser, batchId })
+    console.log(`    处置人有处置权限: ${handlerPerm?.allowed ? '✓' : '✗'}`)
+
+    log('  10.3 单条差异行处置')
+    const firstLineId = diffLines[0].id
+    const setDispResult = await apiJson('PUT', `/dispositions/${firstLineId}`, {
+      batchId,
+      status: 'adjusted',
+      remark: '已调账处理测试',
+      handler: handlerUser,
+      operator: handlerUser,
+    })
+    console.log(`    第一条差异行处置成功: ${setDispResult?.status === 'adjusted' ? '✓' : '✗'}`)
+    console.log(`    处置备注正确: ${setDispResult?.remark === '已调账处理测试' ? '✓' : '✗'}`)
+    console.log(`    经办人正确: ${setDispResult?.handler === handlerUser ? '✓' : '✗'}`)
+
+    log('  10.4 处置历史追溯')
+    const historyResult = await apiJson('GET', `/dispositions/${firstLineId}/history`)
+    console.log(`    历史记录数量 >= 1: ${historyResult.length >= 1 ? '✓' : '✗'}`)
+    if (historyResult.length > 0) {
+      const lastHist = historyResult[historyResult.length - 1]
+      console.log(`    历史操作人正确: ${lastHist.operator === handlerUser ? '✓' : '✗'}`)
+      console.log(`    历史状态变更正确: ${lastHist.to_status === 'adjusted' ? '✓' : '✗'}`)
+    }
+
+    log('  10.5 批量处置')
+    const remainingLineIds = diffLines.slice(1, 3).map(l => l.id)
+    const batchDispResult = await apiJson('PUT', '/dispositions/batch/action', {
+      lineIds: remainingLineIds,
+      batchId,
+      status: 'accepted_loss',
+      remark: '批量认亏处理',
+      handler: handlerUser,
+      operator: handlerUser,
+    })
+    console.log(`    批量处置成功: ${Array.isArray(batchDispResult) && batchDispResult.length === 2 ? '✓' : '✗'}`)
+
+    log('  10.6 按状态筛选差异')
+    const adjustedDisps = await apiJson('GET', `/dispositions?batchId=${batchId}&status=adjusted`)
+    console.log(`    按已调账筛选(1条): ${adjustedDisps?.total === 1 ? '✓' : '✗'}`)
+
+    const acceptedDisps = await apiJson('GET', `/dispositions?batchId=${batchId}&status=accepted_loss`)
+    console.log(`    按已认亏筛选(2条): ${acceptedDisps?.total === 2 ? '✓' : '✗'}`)
+
+    log('  10.7 按SKU筛选差异')
+    const skuFilter = await apiJson('GET', `/dispositions?batchId=${batchId}&sku=SKU`)
+    console.log(`    按SKU筛选(含SKU): ${skuFilter?.total >= 1 ? '✓' : '✗'}`)
+
+    log('  10.8 审计日志记录处置操作')
+    const auditAll = await apiJson('GET', '/audit?pageSize=100')
+    const dispAuditLogs = auditAll.data.filter(l => l.action === 'set_disposition' && l.entity_type === 'discrepancy_line')
+    console.log(`    处置审计日志条数 >= 3: ${dispAuditLogs.length >= 3 ? '✓' : '✗'}`)
+
+    log('  10.9 差异详情包含处置数据')
+    const detailWithDisp = await apiJson('GET', `/discrepancies/${batchId}`)
+    const linesWithDisp = detailWithDisp.lines.filter(l => l.disposition && l.disposition.status !== 'pending')
+    console.log(`    详情页包含处置数据: ${linesWithDisp.length >= 3 ? '✓' : '✗'}`)
+
+    log('  10.10 审批人尝试处置被拒绝')
+    const approverSetDisp = await fetch(`${BASE_URL}/dispositions/${diffLines[3].id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        batchId,
+        status: 'adjusted',
+        remark: '审批人越权尝试',
+        handler: approverUser,
+        operator: approverUser,
+      }),
+    })
+    const approverSetDispBody = await approverSetDisp.json()
+    console.log(`    审批人处置被拒绝: ${!approverSetDispBody.success ? '✓' : '✗'}`)
+
+    // 保存处置历史数量供重启后验证
+    const dispHistoryBefore = await apiJson('GET', `/dispositions/batch/${batchId}/history`)
+    const dispHistoryCount = dispHistoryBefore.length
+
+    // 11. 撤销批准
+    log('11. 撤销批准（生成补偿流水）')
     const rolledBack = await apiJson('PUT', `/discrepancies/${batchId}/rollback`, {
       rolledBackBy: '经理E',
       reason: '盘点数据有误，重新盘点',
@@ -200,8 +297,8 @@ async function main() {
     console.log(`  ✓ 撤销人: ${rolledBack.rolled_back_by}`)
     console.log(`  ✓ 撤销原因: ${rolledBack.rollback_reason}`)
 
-    // 11. 检查补偿流水
-    log('11. 检查补偿流水')
+    // 12. 检查补偿流水
+    log('12. 检查补偿流水')
     const adjustmentsAfterRollback = await apiJson('GET', `/discrepancies/${batchId}/adjustments`)
     console.log(`  ✓ 调整流水总数: ${adjustmentsAfterRollback.length}`)
     const originalAdjs2 = adjustmentsAfterRollback.filter(a => a.adjustment_type === 'original')
@@ -220,8 +317,8 @@ async function main() {
     console.log(`  所有补偿流水都有关联原调整: ${allCompHaveRelated ? '✓' : '✗'}`)
     console.log(`  补偿数量与原调整数量一致: ${compCountMatches ? '✓' : '✗'}`)
 
-    // 12. 检查撤销后的库存（应恢复到初始状态）
-    log('12. 检查撤销后的库存')
+    // 13. 检查撤销后的库存（应恢复到初始状态）
+    log('13. 检查撤销后的库存')
     const afterRollbackInv = await apiJson('GET', '/inventory/current')
     const sku002AfterRollback = afterRollbackInv.find(i => i.sku === 'SKU002')
     const sku005AfterRollback = afterRollbackInv.find(i => i.sku === 'SKU005')
@@ -242,8 +339,8 @@ async function main() {
     console.log(`  SKU004 库存恢复: ${sku004Restored ? '✓' : '✗'}`)
     console.log(`  SKU006 库存恢复: ${sku006Restored ? '✓' : '✗'}`)
 
-    // 13. 导出报告
-    log('13. 导出完整报告')
+    // 14. 导出报告
+    log('14. 导出完整报告')
     const exportRes = await fetch(`${BASE_URL}/discrepancies/${batchId}/export`)
     const exportText = await exportRes.text()
     console.log(`  ✓ 导出成功，文件大小: ${exportText.length} 字节`)
@@ -251,13 +348,17 @@ async function main() {
     // 检查报告中的各个部分
     const hasBatchStatus = exportText.includes('=== 批次状态 ===')
     const hasBatchSection = exportText.includes('=== 1. 批次信息 ===')
-    const hasLinesSection = exportText.includes('=== 2. 差异明细 ===')
+    const hasLinesSection = exportText.includes('=== 2. 差异明细')
     const hasAdjSection = exportText.includes('=== 3. 库存调整流水')
-    const hasAuditSection = exportText.includes('=== 4. 审计日志 ===')
+    const hasDispSection = exportText.includes('=== 4. 处置记录 ===')
+    const hasDispHistSection = exportText.includes('=== 5. 处置历史追溯 ===')
+    const hasAuditSection = exportText.includes('=== 6. 审计日志 ===')
     console.log(`  包含批次状态概览: ${hasBatchStatus ? '✓' : '✗'}`)
     console.log(`  包含批次信息: ${hasBatchSection ? '✓' : '✗'}`)
     console.log(`  包含差异明细: ${hasLinesSection ? '✓' : '✗'}`)
     console.log(`  包含调整流水: ${hasAdjSection ? '✓' : '✗'}`)
+    console.log(`  包含处置记录: ${hasDispSection ? '✓' : '✗'}`)
+    console.log(`  包含处置历史: ${hasDispHistSection ? '✓' : '✗'}`)
     console.log(`  包含审计日志: ${hasAuditSection ? '✓' : '✗'}`)
 
     // 保存导出文件用于验证
@@ -297,8 +398,18 @@ async function main() {
       ['生成补偿流水(4条)', compAdjs2.length === 4],
       ['补偿流水关联正确', allCompHaveRelated && compCountMatches],
       ['撤销后库存恢复', sku002Restored && sku005Restored && sku004Restored && sku006Restored],
-      ['导出报告包含所有部分', hasBatchStatus && hasBatchSection && hasLinesSection && hasAdjSection && hasAuditSection],
+      ['导出报告包含所有部分', hasBatchStatus && hasBatchSection && hasLinesSection && hasAdjSection && hasDispSection && hasDispHistSection && hasAuditSection],
       ['审计日志完整(>=4条)', batchAuditLogs.length >= 4],
+      ['处置角色设置正常', setHandlerRole?.role === 'handler' && setApproverRole?.role === 'approver'],
+      ['处置权限校验正常', !approverPerm?.allowed && handlerPerm?.allowed],
+      ['单条处置正常', setDispResult?.status === 'adjusted'],
+      ['处置历史追溯正常', historyResult.length >= 1],
+      ['批量处置正常', Array.isArray(batchDispResult) && batchDispResult.length === 2],
+      ['按状态筛选正常', adjustedDisps?.total === 1 && acceptedDisps?.total === 2],
+      ['按SKU筛选正常', skuFilter?.total >= 1],
+      ['处置审计日志正常', dispAuditLogs.length >= 3],
+      ['详情含处置数据', linesWithDisp.length >= 3],
+      ['审批人处置被拒绝', !approverSetDispBody.success],
     ]
 
     let allPassed = true
@@ -321,6 +432,8 @@ async function main() {
     fs.writeFileSync(path.join(__dirname, '.test_state.json'), JSON.stringify({
       batchId,
       exportFile: exportPath,
+      dispHistoryCount,
+      dispLinesCount: linesWithDisp.length,
     }), 'utf8')
 
   } catch (err) {
@@ -396,8 +509,26 @@ async function restartTest() {
     const newExportPath = path.join(__dirname, 'test_export_after_restart.csv')
     fs.writeFileSync(newExportPath, newExportText, 'utf8')
 
-    // 5. 检查审计日志
-    log('5. 检查审计日志')
+    // 5. 检查处置数据持久化
+    log('5. 检查处置数据持久化')
+    const dispAfter = await apiJson('GET', `/dispositions?batchId=${batchId}&pageSize=100`)
+    const dispHistAfter = await apiJson('GET', `/dispositions/batch/${batchId}/history`)
+    console.log(`  处置记录数: ${dispAfter?.total}`)
+    console.log(`  处置历史数: ${dispHistAfter?.length}`)
+
+    const dispPersisted = dispAfter?.total >= 3
+    const dispHistPersisted = dispHistAfter?.length >= state.dispHistoryCount
+    console.log(`  处置记录持久化: ${dispPersisted ? '✓' : '✗'}`)
+    console.log(`  处置历史持久化: ${dispHistPersisted ? '✓' : '✗'}`)
+
+    const detailAfter = await apiJson('GET', `/discrepancies/${batchId}`)
+    const linesWithDispAfter = detailAfter.lines.filter(l => l.disposition && l.disposition.status !== 'pending')
+    console.log(`  详情含处置数据行数: ${linesWithDispAfter.length}`)
+    const detailHasDisp = linesWithDispAfter.length >= 3
+    console.log(`  详情含处置数据: ${detailHasDisp ? '✓' : '✗'}`)
+
+    // 6. 检查审计日志
+    log('6. 检查审计日志')
     const auditResult = await apiJson('GET', '/audit?pageSize=100')
     const batchAuditLogs = auditResult.data.filter(
       l => l.entity_type === 'discrepancy_batch' && l.entity_id === batchId
@@ -414,6 +545,9 @@ async function restartTest() {
       ['调整流水完整', adjsCountCorrect],
       ['库存数据正确', sku002?.quantity === 480 && sku005?.quantity === 150],
       ['导出报告一致', exportsMatch],
+      ['处置记录持久化', dispPersisted],
+      ['处置历史持久化', dispHistPersisted],
+      ['详情含处置数据', detailHasDisp],
       ['审计日志完整', batchAuditLogs.length >= 4],
     ]
 

@@ -6,6 +6,10 @@ import type {
   DiscrepancyDetail,
   AuditLogEntry,
   InventoryAdjustment,
+  Disposition,
+  DispositionHistoryEntry,
+  UserRole,
+  UserRoleType,
   ApiResponse,
 } from '@shared/types'
 
@@ -113,5 +117,96 @@ export async function getAuditLogs(
 
 export async function getAdjustments(batchId: number): Promise<ApiResponse<InventoryAdjustment[]>> {
   const res = await fetch(`/api/discrepancies/${batchId}/adjustments`)
+  return res.json()
+}
+
+export async function setDisposition(
+  lineId: number,
+  batchId: number,
+  status: string,
+  remark: string,
+  handler: string,
+  operator: string,
+): Promise<ApiResponse<Disposition>> {
+  const res = await fetch(`/api/dispositions/${lineId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batchId, status, remark, handler, operator }),
+  })
+  return res.json()
+}
+
+export async function batchSetDisposition(
+  lineIds: number[],
+  batchId: number,
+  status: string,
+  remark: string,
+  handler: string,
+  operator: string,
+): Promise<ApiResponse<Disposition[]>> {
+  const res = await fetch('/api/dispositions/batch/action', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lineIds, batchId, status, remark, handler, operator }),
+  })
+  return res.json()
+}
+
+export async function getDispositions(
+  batchId: number,
+  filters?: { status?: string; sku?: string; page?: number; pageSize?: number },
+): Promise<ApiResponse<{ data: (Disposition & { sku: string; name: string; diff_type: string })[]; total: number }>> {
+  const params = new URLSearchParams()
+  params.set('batchId', String(batchId))
+  if (filters?.status) params.set('status', filters.status)
+  if (filters?.sku) params.set('sku', filters.sku)
+  if (filters?.page) params.set('page', String(filters.page))
+  if (filters?.pageSize) params.set('pageSize', String(filters.pageSize))
+  const res = await fetch(`/api/dispositions?${params}`)
+  return res.json()
+}
+
+export async function getDispositionHistory(
+  lineId: number,
+): Promise<ApiResponse<DispositionHistoryEntry[]>> {
+  const res = await fetch(`/api/dispositions/${lineId}/history`)
+  return res.json()
+}
+
+export async function getDispositionHistoryByBatch(
+  batchId: number,
+): Promise<ApiResponse<DispositionHistoryEntry[]>> {
+  const res = await fetch(`/api/dispositions/batch/${batchId}/history`)
+  return res.json()
+}
+
+export async function checkDispositionPermission(
+  operator: string,
+  batchId: number,
+): Promise<ApiResponse<{ allowed: boolean; reason?: string }>> {
+  const res = await fetch('/api/dispositions/check-permission', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ operator, batchId }),
+  })
+  return res.json()
+}
+
+export async function getUserRole(
+  username: string,
+): Promise<ApiResponse<UserRole | null>> {
+  const res = await fetch(`/api/auth/role?username=${encodeURIComponent(username)}`)
+  return res.json()
+}
+
+export async function setUserRole(
+  username: string,
+  role: UserRoleType,
+): Promise<ApiResponse<UserRole>> {
+  const res = await fetch('/api/auth/role', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, role }),
+  })
   return res.json()
 }

@@ -113,7 +113,38 @@ function initTables(db: Database.Database): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS disposition (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      line_id INTEGER NOT NULL UNIQUE REFERENCES discrepancy_line(id),
+      batch_id INTEGER NOT NULL REFERENCES discrepancy_batch(id),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted_loss','adjusted','recounted')),
+      remark TEXT NOT NULL DEFAULT '',
+      handler TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS disposition_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      line_id INTEGER NOT NULL REFERENCES discrepancy_line(id),
+      batch_id INTEGER NOT NULL REFERENCES discrepancy_batch(id),
+      from_status TEXT NOT NULL,
+      to_status TEXT NOT NULL,
+      remark TEXT NOT NULL DEFAULT '',
+      handler TEXT NOT NULL DEFAULT '',
+      operator TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS user_role (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      role TEXT NOT NULL DEFAULT 'handler' CHECK(role IN ('approver','handler','admin'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_discrepancy_line_batch ON discrepancy_line(batch_id);
+    CREATE INDEX IF NOT EXISTS idx_discrepancy_line_sku ON discrepancy_line(sku);
+    CREATE INDEX IF NOT EXISTS idx_discrepancy_line_diff_type ON discrepancy_line(diff_type);
     CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity_id);
     CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at);
     CREATE INDEX IF NOT EXISTS idx_book_inventory_sku ON book_inventory(sku);
@@ -121,6 +152,13 @@ function initTables(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_inventory_adjustment_batch ON inventory_adjustment(batch_id);
     CREATE INDEX IF NOT EXISTS idx_inventory_adjustment_sku ON inventory_adjustment(sku);
     CREATE INDEX IF NOT EXISTS idx_inventory_adjustment_created ON inventory_adjustment(created_at);
+    CREATE INDEX IF NOT EXISTS idx_disposition_line ON disposition(line_id);
+    CREATE INDEX IF NOT EXISTS idx_disposition_batch ON disposition(batch_id);
+    CREATE INDEX IF NOT EXISTS idx_disposition_status ON disposition(status);
+    CREATE INDEX IF NOT EXISTS idx_disposition_handler ON disposition(handler);
+    CREATE INDEX IF NOT EXISTS idx_disposition_history_line ON disposition_history(line_id);
+    CREATE INDEX IF NOT EXISTS idx_disposition_history_batch ON disposition_history(batch_id);
+    CREATE INDEX IF NOT EXISTS idx_disposition_history_created ON disposition_history(created_at);
   `)
 }
 

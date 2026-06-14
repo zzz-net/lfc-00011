@@ -146,15 +146,38 @@ router.get('/:id/export', async (req: Request, res: Response): Promise<void> => 
       return
     }
 
+    const dispStatusLabels: Record<string, string> = {
+      pending: '待处理',
+      accepted_loss: '已认亏',
+      adjusted: '已调账',
+      recounted: '已复盘',
+    }
+
     const batchHeaders = ['id', 'batch_no', 'status', 'created_by', 'reviewed_by', 'approved_by', 'rolled_back_by', 'rollback_reason', 'created_at', 'reviewed_at', 'approved_at', 'rolled_back_at']
-    const lineHeaders = ['id', 'batch_id', 'sku', 'name', 'book_qty', 'physical_qty', 'diff_qty', 'diff_type', 'unit', 'location']
+    const lineHeaders = ['id', 'batch_id', 'sku', 'name', 'book_qty', 'physical_qty', 'diff_qty', 'diff_type', 'unit', 'location', 'disposition_status', 'disposition_handler', 'disposition_remark']
     const adjHeaders = ['id', 'batch_id', 'line_id', 'sku', 'name', 'direction', 'quantity', 'adjustment_type', 'related_adjustment_id', 'operator', 'reason', 'created_at']
     const auditHeaders = ['id', 'action', 'entity_type', 'entity_id', 'operator', 'detail', 'created_at']
+    const dispHeaders = ['id', 'line_id', 'batch_id', 'status', 'remark', 'handler', 'created_at', 'updated_at']
+    const dispHistoryHeaders = ['id', 'line_id', 'batch_id', 'from_status', 'to_status', 'remark', 'handler', 'operator', 'created_at']
+
+    const dispMap = new Map(((data.dispositions || []) as unknown as Record<string, unknown>[]).map(d => [d.line_id, d]))
+
+    const linesWithDisp = (data.lines as unknown as Record<string, unknown>[]).map(l => {
+      const disp = dispMap.get(l.id) as Record<string, unknown> | undefined
+      return {
+        ...l,
+        disposition_status: disp ? dispStatusLabels[disp.status as string] || disp.status : '待处理',
+        disposition_handler: disp?.handler || '',
+        disposition_remark: disp?.remark || '',
+      }
+    })
 
     const batchCsv = toCSV(batchHeaders, [data.batch as unknown as Record<string, unknown>])
-    const linesCsv = toCSV(lineHeaders, data.lines as unknown as Record<string, unknown>[])
+    const linesCsv = toCSV(lineHeaders, linesWithDisp)
     const adjCsv = toCSV(adjHeaders, data.adjustments as unknown as Record<string, unknown>[])
     const auditCsv = toCSV(auditHeaders, data.auditLogs as unknown as Record<string, unknown>[])
+    const dispCsv = toCSV(dispHeaders, (data.dispositions || []) as unknown as Record<string, unknown>[])
+    const dispHistoryCsv = toCSV(dispHistoryHeaders, (data.dispositionHistory || []) as unknown as Record<string, unknown>[])
 
     const statusMap: Record<string, string> = {
       pending_review: '待审核',
@@ -182,13 +205,19 @@ router.get('/:id/export', async (req: Request, res: Response): Promise<void> => 
       `=== 1. 批次信息 ===`,
       batchCsv,
       ``,
-      `=== 2. 差异明细 ===`,
+      `=== 2. 差异明细（含处置状态） ===`,
       linesCsv,
       ``,
       `=== 3. 库存调整流水（原调整 + 补偿） ===`,
       adjCsv,
       ``,
-      `=== 4. 审计日志 ===`,
+      `=== 4. 处置记录 ===`,
+      dispCsv,
+      ``,
+      `=== 5. 处置历史追溯 ===`,
+      dispHistoryCsv,
+      ``,
+      `=== 6. 审计日志 ===`,
       auditCsv,
     ]
 

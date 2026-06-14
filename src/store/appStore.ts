@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { UserRoleType } from '@shared/types'
 
 export interface Toast {
   id: number
@@ -9,6 +10,8 @@ export interface Toast {
 interface AppState {
   operator: string
   setOperator: (name: string) => void
+  role: UserRoleType | null
+  setRole: (role: UserRoleType | null) => void
   toasts: Toast[]
   addToast: (type: Toast['type'], message: string) => void
   removeToast: (id: number) => void
@@ -24,6 +27,8 @@ export const useAppStore = create<AppState>((set) => ({
     try { localStorage.setItem('warehouse_operator', name) } catch {}
     set({ operator: name })
   },
+  role: null,
+  setRole: (role) => set({ role }),
   toasts: [],
   addToast: (type, message) => {
     const id = ++toastId

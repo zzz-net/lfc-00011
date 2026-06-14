@@ -1,6 +1,9 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { Warehouse, Upload, ClipboardList, ScrollText, Download, X } from 'lucide-react'
+import { Warehouse, Upload, ClipboardList, ScrollText, Download, X, Shield } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
+import { useState, useEffect } from 'react'
+import { getUserRole, setUserRole } from '@/api/client'
+import type { UserRoleType } from '@shared/types'
 
 const navItems = [
   { to: '/import', icon: Upload, label: '数据导入' },
@@ -16,7 +19,42 @@ const toastStyles: Record<string, string> = {
 }
 
 export default function Layout() {
-  const { operator, setOperator, toasts, removeToast } = useAppStore()
+  const { operator, setOperator, toasts, removeToast, role, setRole } = useAppStore()
+  const [showRoleSelect, setShowRoleSelect] = useState(false)
+
+  useEffect(() => {
+    if (operator) {
+      getUserRole(operator).then((res) => {
+        if (res.success && res.data) {
+          setRole(res.data.role as UserRoleType)
+        } else {
+          setRole(null)
+        }
+      })
+    } else {
+      setRole(null)
+    }
+  }, [operator])
+
+  async function handleRoleChange(newRole: UserRoleType) {
+    if (!operator) return
+    const res = await setUserRole(operator, newRole)
+    if (res.success && res.data) {
+      setRole(res.data.role as UserRoleType)
+      setShowRoleSelect(false)
+    }
+  }
+
+  const roleLabels: Record<string, string> = {
+    approver: '审批人',
+    handler: '处置人',
+    admin: '管理员',
+  }
+  const roleColors: Record<string, string> = {
+    approver: 'bg-blue-600',
+    handler: 'bg-amber-600',
+    admin: 'bg-purple-600',
+  }
 
   return (
     <div className="flex min-h-screen" style={{ fontFamily: '"Noto Sans SC", sans-serif' }}>
@@ -45,7 +83,7 @@ export default function Layout() {
           ))}
         </nav>
 
-        <div className="px-4 py-4 border-t border-slate-700">
+        <div className="px-4 py-4 border-t border-slate-700 space-y-2">
           <input
             type="text"
             value={operator}
@@ -53,6 +91,40 @@ export default function Layout() {
             placeholder="操作人"
             className="w-full bg-slate-700 text-white text-xs rounded px-3 py-2 placeholder-slate-400 outline-none focus:ring-1 focus:ring-amber-500"
           />
+          {operator && (
+            <div className="relative">
+              <button
+                onClick={() => setShowRoleSelect(!showRoleSelect)}
+                className="w-full flex items-center gap-2 bg-slate-700/50 rounded px-3 py-1.5 text-xs hover:bg-slate-700 transition-colors"
+              >
+                <Shield className="w-3.5 h-3.5 text-slate-400" />
+                <span className="text-slate-300">角色：</span>
+                {role ? (
+                  <span className={`${roleColors[role]} text-white px-1.5 py-0.5 rounded text-[10px] font-medium`}>
+                    {roleLabels[role]}
+                  </span>
+                ) : (
+                  <span className="text-slate-500">未设置</span>
+                )}
+              </button>
+              {showRoleSelect && (
+                <div className="absolute bottom-full left-0 w-full bg-slate-700 rounded shadow-lg mb-1 py-1 z-10">
+                  {(['handler', 'approver', 'admin'] as UserRoleType[]).map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => handleRoleChange(r)}
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-slate-600 transition-colors ${role === r ? 'text-amber-400 font-medium' : 'text-slate-300'}`}
+                    >
+                      <span className={`${roleColors[r]} text-white px-1.5 py-0.5 rounded text-[10px] font-medium mr-2`}>
+                        {roleLabels[r]}
+                      </span>
+                      {role === r && '✓'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </aside>
 

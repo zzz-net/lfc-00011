@@ -1,5 +1,6 @@
 import { getDb } from '../db.js'
 import { logAudit } from './auditService.js'
+import { ensureDispositionForLines, getAllDispositionsByBatch, getDispositionHistoryByBatch } from './dispositionService.js'
 
 export interface DiscrepancyBatch {
   id: number
@@ -159,7 +160,18 @@ export function getDiscrepancyById(id: number): DiscrepancyBatchWithLines | null
   const batch = db.prepare('SELECT * FROM discrepancy_batch WHERE id = ?').get(id) as DiscrepancyBatch | undefined
   if (!batch) return null
   const lines = db.prepare('SELECT * FROM discrepancy_line WHERE batch_id = ?').all(id) as DiscrepancyLine[]
-  return { ...batch, lines }
+
+  ensureDispositionForLines(id)
+
+  const dispositions = getAllDispositionsByBatch(id)
+  const dispMap = new Map(dispositions.map(d => [d.line_id, d]))
+
+  const linesWithDisposition = lines.map(l => ({
+    ...l,
+    disposition: dispMap.get(l.id) || null,
+  }))
+
+  return { ...batch, lines: linesWithDisposition }
 }
 
 export function reviewDiscrepancy(id: number, reviewedBy: string, pass: boolean): DiscrepancyBatch | null {
@@ -291,6 +303,8 @@ export interface FullDiscrepancyExport {
   lines: DiscrepancyLine[]
   adjustments: InventoryAdjustment[]
   auditLogs: AuditLogEntry[]
+  dispositions: ReturnType<typeof getAllDispositionsByBatch>
+  dispositionHistory: ReturnType<typeof getDispositionHistoryByBatch>
 }
 
 export function getAdjustmentsByBatch(batchId: number): InventoryAdjustment[] {
@@ -313,10 +327,15 @@ export function exportDiscrepancy(id: number): FullDiscrepancyExport | null {
     `SELECT * FROM audit_log WHERE entity_type = 'discrepancy_batch' AND entity_id = ? ORDER BY created_at ASC, id ASC`
   ).all(id) as AuditLogEntry[]
 
+  const dispositions = getAllDispositionsByBatch(id)
+  const dispositionHistory = getDispositionHistoryByBatch(id)
+
   return {
     batch: batch as DiscrepancyBatch,
     lines: batch.lines,
     adjustments,
     auditLogs,
+    dispositions,
+    dispositionHistory,
   }
 }

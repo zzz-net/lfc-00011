@@ -14,6 +14,7 @@ import { fileURLToPath } from 'url'
 import authRoutes from './routes/auth.js'
 import inventoryRoutes from './routes/inventory.js'
 import discrepancyRoutes from './routes/discrepancy.js'
+import dispositionRoutes from './routes/disposition.js'
 import auditRoutes from './routes/audit.js'
 
 // for esm mode
@@ -35,6 +36,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.use('/api/auth', authRoutes)
 app.use('/api/inventory', inventoryRoutes)
 app.use('/api/discrepancies', discrepancyRoutes)
+app.use('/api/dispositions', dispositionRoutes)
 app.use('/api/audit', auditRoutes)
 
 /**
