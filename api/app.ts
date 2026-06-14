@@ -17,6 +17,7 @@ import discrepancyRoutes from './routes/discrepancy.js'
 import dispositionRoutes from './routes/disposition.js'
 import auditRoutes from './routes/audit.js'
 import planRoutes from './routes/plan.js'
+import inventoryAlertRoutes from './routes/inventoryAlert.js'
 
 // for esm mode
 const __filename = fileURLToPath(import.meta.url)
@@ -40,6 +41,7 @@ app.use('/api/discrepancies', discrepancyRoutes)
 app.use('/api/dispositions', dispositionRoutes)
 app.use('/api/audit', auditRoutes)
 app.use('/api/plans', planRoutes)
+app.use('/api/alert-rules', inventoryAlertRoutes)
 
 /**
  * health

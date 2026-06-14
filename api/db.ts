@@ -210,6 +210,45 @@ function initTables(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_stocktake_plan_discrepancy_plan ON stocktake_plan_discrepancy(plan_id);
     CREATE INDEX IF NOT EXISTS idx_stocktake_plan_discrepancy_batch ON stocktake_plan_discrepancy(batch_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_stocktake_plan_discrepancy_unique ON stocktake_plan_discrepancy(plan_id, batch_id);
+
+    CREATE TABLE IF NOT EXISTS inventory_alert_rule (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      rule_no TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      alert_type TEXT NOT NULL CHECK(alert_type IN ('low_stock','over_stock','long_uncounted')),
+      scope_type TEXT NOT NULL CHECK(scope_type IN ('sku','category','location')),
+      scope_value TEXT NOT NULL,
+      low_threshold INTEGER DEFAULT NULL,
+      high_threshold INTEGER DEFAULT NULL,
+      uncounted_days INTEGER DEFAULT NULL,
+      is_enabled INTEGER NOT NULL DEFAULT 1,
+      created_by TEXT NOT NULL DEFAULT '',
+      remark TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_calculated_at TEXT DEFAULT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS inventory_alert_result (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      rule_id INTEGER NOT NULL REFERENCES inventory_alert_rule(id) ON DELETE CASCADE,
+      inventory_id INTEGER NOT NULL REFERENCES current_inventory(id) ON DELETE CASCADE,
+      sku TEXT NOT NULL,
+      name TEXT NOT NULL,
+      location TEXT NOT NULL DEFAULT '',
+      current_qty INTEGER NOT NULL DEFAULT 0,
+      threshold INTEGER NOT NULL,
+      alert_value INTEGER NOT NULL,
+      calculated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_inventory_alert_rule_type ON inventory_alert_rule(alert_type);
+    CREATE INDEX IF NOT EXISTS idx_inventory_alert_rule_scope ON inventory_alert_rule(scope_type, scope_value);
+    CREATE INDEX IF NOT EXISTS idx_inventory_alert_rule_enabled ON inventory_alert_rule(is_enabled);
+    CREATE INDEX IF NOT EXISTS idx_inventory_alert_result_rule ON inventory_alert_result(rule_id);
+    CREATE INDEX IF NOT EXISTS idx_inventory_alert_result_sku ON inventory_alert_result(sku);
+    CREATE INDEX IF NOT EXISTS idx_inventory_alert_result_calculated ON inventory_alert_result(calculated_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_alert_result_unique ON inventory_alert_result(rule_id, inventory_id, calculated_at);
   `)
 }
 

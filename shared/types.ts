@@ -199,3 +199,57 @@ export interface DashboardStats {
     totalQuantity: number
   }
 }
+
+export type AlertType = 'low_stock' | 'over_stock' | 'long_uncounted';
+export type AlertScopeType = 'sku' | 'category' | 'location';
+export type AlertRuleStatus = 'enabled' | 'disabled';
+
+export interface InventoryAlertRule {
+  id: number;
+  rule_no: string;
+  name: string;
+  alert_type: AlertType;
+  scope_type: AlertScopeType;
+  scope_value: string;
+  low_threshold: number | null;
+  high_threshold: number | null;
+  uncounted_days: number | null;
+  is_enabled: number;
+  created_by: string;
+  remark: string | null;
+  created_at: string;
+  updated_at: string;
+  last_calculated_at: string | null;
+}
+
+export interface InventoryAlertResult {
+  id: number;
+  rule_id: number;
+  inventory_id: number;
+  sku: string;
+  name: string;
+  location: string;
+  current_qty: number;
+  threshold: number;
+  alert_value: number;
+  calculated_at: string;
+}
+
+export interface InventoryAlertRuleDetail extends InventoryAlertRule {
+  matched_items: InventoryAlertResult[];
+}
+
+export interface ImportAlertRuleError {
+  row: number;
+  field?: string;
+  value?: string;
+  message: string;
+}
+
+export interface ImportAlertRuleResult {
+  success: boolean;
+  imported: number;
+  skipped: number;
+  errors: ImportAlertRuleError[];
+  warnings: string[];
+}
