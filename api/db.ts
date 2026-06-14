@@ -206,8 +206,10 @@ function initTables(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_stocktake_plan_status ON stocktake_plan(status);
     CREATE INDEX IF NOT EXISTS idx_stocktake_plan_date ON stocktake_plan(plan_date);
     CREATE INDEX IF NOT EXISTS idx_stocktake_plan_import_plan ON stocktake_plan_import(plan_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_stocktake_plan_import_unique ON stocktake_plan_import(plan_id, import_type, batch_no);
     CREATE INDEX IF NOT EXISTS idx_stocktake_plan_discrepancy_plan ON stocktake_plan_discrepancy(plan_id);
     CREATE INDEX IF NOT EXISTS idx_stocktake_plan_discrepancy_batch ON stocktake_plan_discrepancy(batch_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_stocktake_plan_discrepancy_unique ON stocktake_plan_discrepancy(plan_id, batch_id);
   `)
 }
 

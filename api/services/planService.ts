@@ -308,14 +308,67 @@ export function startPlan(id: number, operator: string): StocktakePlan {
     throw new Error('只有计划执行人或创建人可以开始计划')
   }
 
-  db.prepare(`
-    UPDATE stocktake_plan
-    SET status = 'in_progress',
-        started_by = ?,
-        started_at = datetime('now'),
-        updated_at = datetime('now')
-    WHERE id = ?
-  `).run(operator, id)
+  const tx = db.transaction(() => {
+    db.prepare(`
+      UPDATE stocktake_plan
+      SET status = 'in_progress',
+          started_by = ?,
+          started_at = datetime('now'),
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(operator, id)
+
+    const startDate = plan.plan_date
+    const endDate = plan.plan_end_date || plan.plan_date
+
+    const bookBatches = db.prepare(`
+      SELECT DISTINCT batch_no FROM book_inventory
+      WHERE date(created_at) >= date(?) AND date(created_at) <= date(?)
+    `).all(startDate, endDate) as Array<{ batch_no: string }>
+
+    const physicalBatches = db.prepare(`
+      SELECT DISTINCT batch_no FROM physical_inventory
+      WHERE date(created_at) >= date(?) AND date(created_at) <= date(?)
+    `).all(startDate, endDate) as Array<{ batch_no: string }>
+
+    const insertImportStmt = db.prepare(`
+      INSERT OR IGNORE INTO stocktake_plan_import (plan_id, import_type, batch_no)
+      VALUES (?, ?, ?)
+    `)
+
+    for (const { batch_no } of bookBatches) {
+      insertImportStmt.run(id, 'book', batch_no)
+    }
+    for (const { batch_no } of physicalBatches) {
+      insertImportStmt.run(id, 'physical', batch_no)
+    }
+
+    let discrepancyBatches: Array<{ id: number }>
+    if (plan.scope_type === 'by_category' && plan.category) {
+      discrepancyBatches = db.prepare(`
+        SELECT DISTINCT db.id FROM discrepancy_batch db
+        INNER JOIN discrepancy_line dl ON db.id = dl.batch_id
+        WHERE date(db.created_at) >= date(?) AND date(db.created_at) <= date(?)
+          AND (dl.name LIKE ? OR dl.location LIKE ?)
+      `).all(startDate, endDate, `%${plan.category}%`, `%${plan.category}%`)
+    } else {
+      discrepancyBatches = db.prepare(`
+        SELECT id FROM discrepancy_batch
+        WHERE date(created_at) >= date(?) AND date(created_at) <= date(?)
+      `).all(startDate, endDate) as Array<{ id: number }>
+    }
+
+    const insertDiscrepancyStmt = db.prepare(`
+      INSERT OR IGNORE INTO stocktake_plan_discrepancy (plan_id, batch_id)
+      VALUES (?, ?)
+    `)
+
+    for (const { id: batchId } of discrepancyBatches) {
+      insertDiscrepancyStmt.run(id, batchId)
+    }
+  })
+
+  tx()
 
   const updatedPlan = getPlanById(id)
   if (!updatedPlan) {
@@ -517,6 +570,9 @@ export function getPlanSummary(planId: number) {
 
   const discrepancyBatchCount = discrepancyBatches.length
 
+  const isByCategory = plan.scope_type === 'by_category' && plan.category
+  const categoryFilter = isByCategory ? `%${plan.category}%` : null
+
   let totalDiffLines = 0
   let diffAmount = 0
   let totalDispositions = 0
@@ -525,16 +581,32 @@ export function getPlanSummary(planId: number) {
   let approvedBatches = 0
 
   for (const batch of discrepancyBatches) {
-    const lines = db.prepare(`
-      SELECT id, diff_qty FROM discrepancy_line WHERE batch_id = ?
-    `).all(batch.id) as Array<{ id: number; diff_qty: number }>
+    let linesSql = 'SELECT id, diff_qty FROM discrepancy_line WHERE batch_id = ?'
+    const params: unknown[] = [batch.id]
+
+    if (isByCategory) {
+      linesSql += ' AND (name LIKE ? OR location LIKE ?)'
+      params.push(categoryFilter, categoryFilter)
+    }
+
+    const lines = db.prepare(linesSql).all(...params) as Array<{ id: number; diff_qty: number }>
 
     totalDiffLines += lines.length
     diffAmount += lines.reduce((sum, l) => sum + Math.abs(l.diff_qty), 0)
 
-    const dispositions = db.prepare(`
-      SELECT status FROM disposition WHERE batch_id = ?
-    `).all(batch.id) as Array<{ status: string }>
+    let dispositionsSql = 'SELECT status FROM disposition WHERE batch_id = ?'
+    const dispParams: unknown[] = [batch.id]
+
+    if (isByCategory) {
+      dispositionsSql = `
+        SELECT d.status FROM disposition d
+        INNER JOIN discrepancy_line dl ON d.line_id = dl.id
+        WHERE d.batch_id = ? AND (dl.name LIKE ? OR dl.location LIKE ?)
+      `
+      dispParams.push(categoryFilter, categoryFilter)
+    }
+
+    const dispositions = db.prepare(dispositionsSql).all(...dispParams) as Array<{ status: string }>
 
     totalDispositions += dispositions.length
     completedDispositions += dispositions.filter(d => d.status !== 'pending').length
