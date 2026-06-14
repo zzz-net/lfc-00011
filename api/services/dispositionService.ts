@@ -52,7 +52,7 @@ export function setUserRole(username: string, role: string): UserRole {
   return db.prepare('SELECT * FROM user_role WHERE username = ?').get(username) as UserRole
 }
 
-export function checkDispositionPermission(operator: string, batchId: number): void {
+export function checkDispositionPermission(operator: string, batchId: number, handler?: string): void {
   const roleRow = getUserRole(operator)
   if (!roleRow) {
     throw new Error(`用户 ${operator} 未分配角色，请联系管理员设置角色`)
@@ -65,6 +65,9 @@ export function checkDispositionPermission(operator: string, batchId: number): v
   const batch = db.prepare('SELECT approved_by FROM discrepancy_batch WHERE id = ?').get(batchId) as { approved_by: string | null } | undefined
   if (batch && batch.approved_by === operator) {
     throw new Error('审批人与处置人不能是同一人')
+  }
+  if (batch && handler && batch.approved_by === handler) {
+    throw new Error('经办人不能是审批人')
   }
 }
 
@@ -87,7 +90,7 @@ export function setDisposition(
     throw new Error('差异行不存在')
   }
 
-  checkDispositionPermission(operator, batchId)
+  checkDispositionPermission(operator, batchId, handler)
 
   return db.transaction(() => {
     const existing = db.prepare('SELECT * FROM disposition WHERE line_id = ?').get(lineId) as Disposition | undefined
@@ -129,7 +132,7 @@ export function batchSetDisposition(
   handler: string,
   operator: string
 ): Disposition[] {
-  checkDispositionPermission(operator, batchId)
+  checkDispositionPermission(operator, batchId, handler)
 
   const results: Disposition[] = []
   const db = getDb()

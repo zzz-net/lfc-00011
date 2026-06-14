@@ -283,6 +283,21 @@ async function main() {
     const approverSetDispBody = await approverSetDisp.json()
     console.log(`    审批人处置被拒绝: ${!approverSetDispBody.success ? '✓' : '✗'}`)
 
+    log('  10.11 handler=审批人绕过校验被拒绝')
+    const handlerBypassRes = await fetch(`${BASE_URL}/dispositions/${diffLines[3].id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        batchId,
+        status: 'adjusted',
+        remark: 'handler填审批人绕过尝试',
+        handler: approved.approved_by,
+        operator: handlerUser,
+      }),
+    })
+    const handlerBypassBody = await handlerBypassRes.json()
+    console.log(`    handler=审批人被拒绝(403): ${!handlerBypassBody.success && handlerBypassRes.status === 403 ? '✓' : '✗'}`)
+
     // 保存处置历史数量供重启后验证
     const dispHistoryBefore = await apiJson('GET', `/dispositions/batch/${batchId}/history`)
     const dispHistoryCount = dispHistoryBefore.length
@@ -410,6 +425,7 @@ async function main() {
       ['处置审计日志正常', dispAuditLogs.length >= 3],
       ['详情含处置数据', linesWithDisp.length >= 3],
       ['审批人处置被拒绝', !approverSetDispBody.success],
+      ['handler=审批人绕过被拒绝', !handlerBypassBody.success],
     ]
 
     let allPassed = true

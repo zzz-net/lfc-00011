@@ -34,12 +34,12 @@ router.put('/batch/action', async (req: Request, res: Response): Promise<void> =
 
 router.post('/check-permission', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { operator, batchId } = req.body
+    const { operator, batchId, handler } = req.body
     if (!operator || !batchId) {
       res.status(400).json({ success: false, error: '缺少 operator 或 batchId' })
       return
     }
-    checkDispositionPermission(operator, batchId)
+    checkDispositionPermission(operator, batchId, handler)
     res.json({ success: true, data: { allowed: true } })
   } catch (err) {
     res.json({ success: true, data: { allowed: false, reason: (err as Error).message } })
