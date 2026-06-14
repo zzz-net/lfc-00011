@@ -68,8 +68,59 @@ async function main() {
   console.log('========== 库存盘点系统 - 完整流程验证 ==========\n')
 
   try {
-    // 1. 导入账面库存
-    log('1. 导入账面库存')
+    // ==========================================
+    // 阶段0: 仪表盘初始状态 + CSV脏数据校验测试
+    // ==========================================
+
+    log('0. 仪表盘统计 + CSV脏数据校验')
+
+    log('  0.1 获取空数据库的仪表盘统计')
+    const emptyStats = await apiJson('GET', '/discrepancies/dashboard/stats')
+    console.log(`    空仪表盘返回成功: ${!!emptyStats ? '✓' : '✗'}`)
+    console.log(`    包含差异分布字段: ${'diffAmountDistribution' in emptyStats ? '✓' : '✗'}`)
+    console.log(`    包含处置占比字段: ${'dispositionStatusDistribution' in emptyStats ? '✓' : '✗'}`)
+    console.log(`    包含审批通过率字段: ${'recentApprovalRate' in emptyStats ? '✓' : '✗'}`)
+    console.log(`    包含库存统计字段: ${'inventoryStats' in emptyStats ? '✓' : '✗'}`)
+
+    log('  0.2 测试账面导入 - 非法数量报错')
+    const bookInvalidQty = await uploadFile(
+      '/inventory/book',
+      path.join(__dirname, 'samples', 'book_invalid_qty.csv'),
+      '测试员A'
+    )
+    const bookInvalidCorrect = !bookInvalidQty.success &&
+      bookInvalidQty.error &&
+      bookInvalidQty.error.includes('数量字段存在非法值') &&
+      bookInvalidQty.error.includes('第3行') &&
+      bookInvalidQty.error.includes('第5行')
+    console.log(`    非法数量被拦截并报行号: ${bookInvalidCorrect ? '✓' : '✗'}`)
+    if (!bookInvalidCorrect) console.log('    错误信息:', bookInvalidQty.error)
+
+    log('  0.3 测试账面导入 - 空SKU跳过计数')
+    const bookEmptySku = await uploadFile(
+      '/inventory/book',
+      path.join(__dirname, 'samples', 'book_empty_sku.csv'),
+      '测试员A'
+    )
+    const bookEmptyCorrect = bookEmptySku.success &&
+      bookEmptySku.data.count === 3 &&
+      bookEmptySku.data.skippedEmptySkuCount === 2
+    console.log(`    空SKU正确跳过(3有效/2跳过): ${bookEmptyCorrect ? '✓' : '✗'}`)
+    console.log(`    实际导入数=${bookEmptySku.data?.count}, 跳过数=${bookEmptySku.data?.skippedEmptySkuCount}`)
+
+    log('  0.4 测试实盘导入 - 非法数量报错')
+    const physicalInvalidQty = await uploadFile(
+      '/inventory/physical',
+      path.join(__dirname, 'samples', 'physical_invalid_qty.csv'),
+      '盘点员B'
+    )
+    // 注意：第2行是负数（在importPhysicalInventory校验），第4行是"xyz"（路由校验）
+    const physicalInvalidCorrect = !physicalInvalidQty.success
+    console.log(`    实盘非法数量/负数被拦截: ${physicalInvalidCorrect ? '✓' : '✗'}`)
+    if (!physicalInvalidCorrect) console.log('    响应:', JSON.stringify(physicalInvalidQty))
+
+    // 1. 导入账面库存（正式测试用的正常数据）
+    log('1. 导入账面库存（正式数据）')
     const bookResult = await uploadFile(
       '/inventory/book',
       path.join(__dirname, 'samples', 'book_inventory.csv'),
@@ -237,6 +288,10 @@ async function main() {
 
     log('  10.5 批量处置')
     const remainingLineIds = diffLines.slice(1, 3).map(l => l.id)
+    // 先记录处置前的状态用于回滚验证
+    const dispBeforeBatch = await Promise.all(
+      remainingLineIds.map(lid => fetch(`${BASE_URL}/dispositions/${lid}/history`).then(r => r.json()).then(j => j.data || []))
+    )
     const batchDispResult = await apiJson('PUT', '/dispositions/batch/action', {
       lineIds: remainingLineIds,
       batchId,
@@ -246,6 +301,45 @@ async function main() {
       operator: handlerUser,
     })
     console.log(`    批量处置成功: ${Array.isArray(batchDispResult) && batchDispResult.length === 2 ? '✓' : '✗'}`)
+
+    log('  10.5.1 批量处置中途失败回滚测试')
+    // 构造一个包含不存在lineId的批量请求（其中夹杂一个有效ID）
+    const fakeLineId = 9999999
+    const lineToTest = diffLines[3].id
+    // 先记录测试行处置前的状态
+    const dispBeforeFail = await apiJson('GET', `/dispositions/${lineToTest}/history`)
+    const beforeFailCount = dispBeforeFail.length
+    const mixedLineIds = [lineToTest, fakeLineId]
+    const batchFailRes = await fetch(`${BASE_URL}/dispositions/batch/action`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lineIds: mixedLineIds,
+        batchId,
+        status: 'adjusted',
+        remark: '这个请求应该完全回滚',
+        handler: handlerUser,
+        operator: handlerUser,
+      }),
+    })
+    const batchFailBody = await batchFailRes.json()
+    const batchRollbackCorrect = !batchFailBody.success && batchFailBody.error && batchFailBody.error.includes('不存在')
+    console.log(`    批量处置包含无效ID时报错: ${batchRollbackCorrect ? '✓' : '✗'}`)
+    // 验证有效ID没有被部分修改（回滚生效）
+    const dispAfterFail = await apiJson('GET', `/dispositions/${lineToTest}/history`)
+    const historyUnchanged = dispAfterFail.length === beforeFailCount
+    console.log(`    有效ID处置历史未被污染(回滚正确): ${historyUnchanged ? '✓' : '✗'}`)
+    if (!historyUnchanged) {
+      console.log(`    处置前历史: ${beforeFailCount}条, 处置后: ${dispAfterFail.length}条`)
+    }
+
+    log('  10.5.2 批量操作审计日志记录')
+    const auditBatch = await apiJson('GET', '/audit?pageSize=100')
+    const batchDispAuditLogs = auditBatch.data.filter(
+      l => l.action === 'batch_set_disposition' && l.entity_type === 'discrepancy_batch' && l.entity_id === batchId
+    )
+    const batchDispAuditOk = batchDispAuditLogs.length >= 1
+    console.log(`    批量处置汇总审计日志存在: ${batchDispAuditOk ? '✓' : '✗'}`)
 
     log('  10.6 按状态筛选差异')
     const adjustedDisps = await apiJson('GET', `/dispositions?batchId=${batchId}&status=adjusted`)
@@ -301,6 +395,58 @@ async function main() {
     // 保存处置历史数量供重启后验证
     const dispHistoryBefore = await apiJson('GET', `/dispositions/batch/${batchId}/history`)
     const dispHistoryCount = dispHistoryBefore.length
+
+    // ==========================================
+    // 新功能验证: 仪表盘数据与实际对账
+    // ==========================================
+    log('15. 仪表盘数据与实际对账验证')
+
+    const finalStats = await apiJson('GET', '/discrepancies/dashboard/stats')
+
+    // 15.1 盘盈盘亏数量分布对账
+    log('  15.1 盘盈盘亏数量分布对账')
+    const distSurplus = finalStats.diffAmountDistribution.surplus
+    const distShortage = finalStats.diffAmountDistribution.shortage
+    const distMissed = finalStats.diffAmountDistribution.missed
+    const surplusMatches = distSurplus.count === surplusCount && distSurplus.totalAbsQty === 10
+    const shortageMatches = distShortage.count === shortageCount && distShortage.totalAbsQty === 30
+    const missedMatches = distMissed.count === missedCount && distMissed.totalAbsQty === 300
+    console.log(`    盘盈统计正确(${surplusCount}条/10个): ${surplusMatches ? '✓' : '✗'}`)
+    console.log(`    盘亏统计正确(${shortageCount}条/30个): ${shortageMatches ? '✓' : '✗'}`)
+    console.log(`    漏盘统计正确(${missedCount}条/300个): ${missedMatches ? '✓' : '✗'}`)
+    if (!surplusMatches) console.log(`      实际盘盈:`, distSurplus)
+    if (!shortageMatches) console.log(`      实际盘亏:`, distShortage)
+    if (!missedMatches) console.log(`      实际漏盘:`, distMissed)
+
+    // 15.2 各处置状态占比对账
+    log('  15.2 各处置状态占比对账')
+    const dispDist = finalStats.dispositionStatusDistribution
+    const adjustedItem = dispDist.find(d => d.status === 'adjusted')
+    const acceptedLossItem = dispDist.find(d => d.status === 'accepted_loss')
+    const pendingItem = dispDist.find(d => d.status === 'pending')
+    const totalDispCount = (adjustedItem?.count || 0) + (acceptedLossItem?.count || 0) + (pendingItem?.count || 0)
+    const dispMatches = (adjustedItem?.count === 1) && (acceptedLossItem?.count === 2) && (pendingItem?.count === 1) && totalDispCount === 4
+    console.log(`    已调账(1条): ${adjustedItem?.count === 1 ? '✓' : '✗'}`)
+    console.log(`    已认亏(2条): ${acceptedLossItem?.count === 2 ? '✓' : '✗'}`)
+    console.log(`    待处理(1条): ${pendingItem?.count === 1 ? '✓' : '✗'}`)
+    console.log(`    处置占比完整(共4条): ${dispMatches ? '✓' : '✗'}`)
+    if (!dispMatches) console.log('      实际数据:', dispDist)
+
+    // 15.3 最近批次审批通过率对账
+    log('  15.3 最近批次审批通过率对账')
+    const approval = finalStats.recentApprovalRate
+    console.log(`    最近批次数=1: ${approval.totalBatches === 1 ? '✓' : '✗'}`)
+    console.log(`    已复核数=1: ${approval.reviewedBatches === 1 ? '✓' : '✗'}`)
+    console.log(`    已批准数=1: ${approval.approvedBatches === 1 ? '✓' : '✗'}`)
+
+    // 15.4 总体统计
+    log('  15.4 总体统计')
+    const totalBatchesOk = finalStats.totalBatches === 1
+    const totalLinesOk = finalStats.totalLines === 4
+    const skuCountOk = finalStats.inventoryStats.skuCount >= 6
+    console.log(`    总批次数=1: ${totalBatchesOk ? '✓' : '✗'} (实际:${finalStats.totalBatches})`)
+    console.log(`    总差异行=4: ${totalLinesOk ? '✓' : '✗'} (实际:${finalStats.totalLines})`)
+    console.log(`    SKU种类>=6: ${skuCountOk ? '✓' : '✗'} (实际:${finalStats.inventoryStats.skuCount})`)
 
     // 11. 撤销批准
     log('11. 撤销批准（生成补偿流水）')
@@ -387,6 +533,10 @@ async function main() {
 
     // 14. 审计日志检查
     log('14. 检查审计日志')
+
+    // 保存撤销后的仪表盘数据（重启后对比用）
+    const finalStatsAfterRollback = await apiJson('GET', '/discrepancies/dashboard/stats')
+    log('  已保存撤销后的仪表盘快照（用于重启后对比）')
     const auditResult = await apiJson('GET', '/audit?pageSize=100')
     console.log(`  ✓ 审计日志总数: ${auditResult.total}`)
 
@@ -401,6 +551,10 @@ async function main() {
     // 汇总
     console.log('\n========== 验证结果汇总 ==========')
     const results = [
+      ['【CSV校验】账面非法数量拦截', bookInvalidCorrect],
+      ['【CSV校验】账面空SKU跳过计数正确', bookEmptyCorrect],
+      ['【CSV校验】实盘非法/负数数量拦截', physicalInvalidCorrect],
+      ['【仪表盘】空仪表盘API结构完整', 'diffAmountDistribution' in emptyStats && 'dispositionStatusDistribution' in emptyStats && 'recentApprovalRate' in emptyStats],
       ['账面库存导入', bookResult.success],
       ['实物盘点导入', physicalResult.success],
       ['负数实盘报错', !negativeResult.success],
@@ -420,12 +574,19 @@ async function main() {
       ['单条处置正常', setDispResult?.status === 'adjusted'],
       ['处置历史追溯正常', historyResult.length >= 1],
       ['批量处置正常', Array.isArray(batchDispResult) && batchDispResult.length === 2],
+      ['【批量事务】批量含无效ID时报错', batchRollbackCorrect],
+      ['【批量事务】回滚不污染有效数据', historyUnchanged],
+      ['【批量事务】汇总审计日志存在', batchDispAuditOk],
       ['按状态筛选正常', adjustedDisps?.total === 1 && acceptedDisps?.total === 2],
       ['按SKU筛选正常', skuFilter?.total >= 1],
       ['处置审计日志正常', dispAuditLogs.length >= 3],
       ['详情含处置数据', linesWithDisp.length >= 3],
       ['审批人处置被拒绝', !approverSetDispBody.success],
       ['handler=审批人绕过被拒绝', !handlerBypassBody.success],
+      ['【仪表盘】盘盈盘亏分布正确', surplusMatches && shortageMatches && missedMatches],
+      ['【仪表盘】处置状态占比正确', dispMatches],
+      ['【仪表盘】审批通过率结构正确', approval.totalBatches === 1],
+      ['【仪表盘】总体统计正确', totalBatchesOk && totalLinesOk && skuCountOk],
     ]
 
     let allPassed = true
@@ -450,6 +611,7 @@ async function main() {
       exportFile: exportPath,
       dispHistoryCount,
       dispLinesCount: linesWithDisp.length,
+      dashboardStats: finalStatsAfterRollback,
     }), 'utf8')
 
   } catch (err) {
@@ -470,6 +632,7 @@ async function restartTest() {
     }
     const state = JSON.parse(fs.readFileSync(statePath, 'utf8'))
     const batchId = state.batchId
+    const savedDashboardStats = state.dashboardStats
 
     // 1. 检查批次是否还在
     log('1. 检查差异批次')
@@ -554,6 +717,39 @@ async function restartTest() {
       console.log(`  - ${logEntry.action}: ${logEntry.operator}`)
     }
 
+    // 7. 检查仪表盘统计持久化
+    log('7. 检查仪表盘统计持久化')
+    const dashboardAfterRestart = await apiJson('GET', '/discrepancies/dashboard/stats')
+
+    // 深度对比关键数据
+    function deepCompare(a, b, path = '') {
+      if (typeof a !== typeof b) return { match: false, path, reason: `类型不同: ${typeof a} vs ${typeof b}` }
+      if (typeof a !== 'object' || a === null) {
+        if (a === b) return { match: true }
+        return { match: false, path, reason: `值不同: ${a} vs ${b}` }
+      }
+      if (Array.isArray(a) !== Array.isArray(b)) return { match: false, path, reason: '数组/对象不同' }
+      const keysA = Object.keys(a)
+      const keysB = Object.keys(b)
+      if (keysA.length !== keysB.length) return { match: false, path, reason: `键数量不同: ${keysA.length} vs ${keysB.length}` }
+      for (const k of keysA) {
+        if (!(k in b)) return { match: false, path: path + '.' + k, reason: '缺少键' }
+        const r = deepCompare(a[k], b[k], path + '.' + k)
+        if (!r.match) return r
+      }
+      return { match: true }
+    }
+
+    const dashboardCompare = deepCompare(dashboardAfterRestart, savedDashboardStats)
+    console.log(`  仪表盘数据与重启前完全一致: ${dashboardCompare.match ? '✓' : '✗'}`)
+    if (!dashboardCompare.match) {
+      console.log(`    差异路径: ${dashboardCompare.path}, 原因: ${dashboardCompare.reason}`)
+    }
+    console.log(`  重启后总批次数: ${dashboardAfterRestart.totalBatches}`)
+    console.log(`  重启后总差异行: ${dashboardAfterRestart.totalLines}`)
+    console.log(`  重启后库存SKU数: ${dashboardAfterRestart.inventoryStats.skuCount}`)
+    console.log(`  重启后SKU002库存恢复验证(应为480): 见上库存检查`)
+
     // 汇总
     console.log('\n========== 重启验证结果 ==========')
     const results = [
@@ -565,6 +761,7 @@ async function restartTest() {
       ['处置历史持久化', dispHistPersisted],
       ['详情含处置数据', detailHasDisp],
       ['审计日志完整', batchAuditLogs.length >= 4],
+      ['【仪表盘】重启后统计不变', dashboardCompare.match],
     ]
 
     let allPassed = true

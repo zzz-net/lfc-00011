@@ -9,6 +9,7 @@ import {
   rollbackDiscrepancy,
   exportDiscrepancy,
   getDiscrepancyStats,
+  getDashboardStats,
 } from '../services/discrepancyService.js'
 
 const router = Router()
@@ -47,6 +48,15 @@ router.get('/', async (_req: Request, res: Response): Promise<void> => {
     const data = getDiscrepancies()
     const stats = getDiscrepancyStats()
     res.json({ success: true, data: { batches: data, stats } })
+  } catch (err) {
+    res.status(500).json({ success: false, error: (err as Error).message })
+  }
+})
+
+router.get('/dashboard/stats', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const data = getDashboardStats()
+    res.json({ success: true, data })
   } catch (err) {
     res.status(500).json({ success: false, error: (err as Error).message })
   }

@@ -93,35 +93,47 @@ export function setDisposition(
   checkDispositionPermission(operator, batchId, handler)
 
   return db.transaction(() => {
-    const existing = db.prepare('SELECT * FROM disposition WHERE line_id = ?').get(lineId) as Disposition | undefined
-
-    const fromStatus = existing ? existing.status : 'pending'
-
-    if (existing) {
-      db.prepare(
-        `UPDATE disposition SET status = ?, remark = ?, handler = ?, updated_at = datetime('now') WHERE line_id = ?`
-      ).run(status, remark, handler, lineId)
-    } else {
-      db.prepare(
-        `INSERT INTO disposition (line_id, batch_id, status, remark, handler) VALUES (?, ?, ?, ?, ?)`
-      ).run(lineId, batchId, status, remark, handler)
-    }
-
-    db.prepare(
-      `INSERT INTO disposition_history (line_id, batch_id, from_status, to_status, remark, handler, operator)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(lineId, batchId, fromStatus, status, remark, handler, operator)
-
-    logAudit(
-      'set_disposition',
-      'discrepancy_line',
-      lineId,
-      operator,
-      `batch_id=${batchId}, ${fromStatus}->${status}, handler=${handler}, remark=${remark}`
-    )
-
-    return db.prepare('SELECT * FROM disposition WHERE line_id = ?').get(lineId) as Disposition
+    return _setDispositionCore(lineId, batchId, status, remark, handler, operator)
   })()
+}
+
+function _setDispositionCore(
+  lineId: number,
+  batchId: number,
+  status: DispositionStatus,
+  remark: string,
+  handler: string,
+  operator: string
+): Disposition {
+  const db = getDb()
+  const existing = db.prepare('SELECT * FROM disposition WHERE line_id = ?').get(lineId) as Disposition | undefined
+
+  const fromStatus = existing ? existing.status : 'pending'
+
+  if (existing) {
+    db.prepare(
+      `UPDATE disposition SET status = ?, remark = ?, handler = ?, updated_at = datetime('now') WHERE line_id = ?`
+    ).run(status, remark, handler, lineId)
+  } else {
+    db.prepare(
+      `INSERT INTO disposition (line_id, batch_id, status, remark, handler) VALUES (?, ?, ?, ?, ?)`
+    ).run(lineId, batchId, status, remark, handler)
+  }
+
+  db.prepare(
+    `INSERT INTO disposition_history (line_id, batch_id, from_status, to_status, remark, handler, operator)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(lineId, batchId, fromStatus, status, remark, handler, operator)
+
+  logAudit(
+    'set_disposition',
+    'discrepancy_line',
+    lineId,
+    operator,
+    `batch_id=${batchId}, ${fromStatus}->${status}, handler=${handler}, remark=${remark}`
+  )
+
+  return db.prepare('SELECT * FROM disposition WHERE line_id = ?').get(lineId) as Disposition
 }
 
 export function batchSetDisposition(
@@ -132,19 +144,40 @@ export function batchSetDisposition(
   handler: string,
   operator: string
 ): Disposition[] {
+  if (!VALID_STATUSES.includes(status)) {
+    throw new Error(`无效处置状态: ${status}`)
+  }
+
   checkDispositionPermission(operator, batchId, handler)
 
-  const results: Disposition[] = []
   const db = getDb()
 
-  const tx = db.transaction(() => {
+  // 预先检查所有差异行存在性，避免中途失败
+  for (const lineId of lineIds) {
+    const line = db.prepare('SELECT * FROM discrepancy_line WHERE id = ? AND batch_id = ?').get(lineId, batchId)
+    if (!line) {
+      throw new Error(`差异行 #${lineId} 不存在`)
+    }
+  }
+
+  const results: Disposition[] = []
+
+  db.transaction(() => {
     for (const lineId of lineIds) {
-      const result = setDisposition(lineId, batchId, status, remark, handler, operator)
+      const result = _setDispositionCore(lineId, batchId, status, remark, handler, operator)
       results.push(result)
     }
-  })
 
-  tx()
+    // 批量操作汇总审计日志
+    logAudit(
+      'batch_set_disposition',
+      'discrepancy_batch',
+      batchId,
+      operator,
+      `batch_id=${batchId}, lines=[${lineIds.join(',')}], count=${lineIds.length}, target_status=${status}, handler=${handler}, remark=${remark}`
+    )
+  })()
+
   return results
 }
 

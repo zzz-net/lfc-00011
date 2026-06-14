@@ -11,6 +11,7 @@ import type {
   UserRole,
   UserRoleType,
   ApiResponse,
+  DashboardStats,
 } from '@shared/types'
 
 export async function importBookInventory(
@@ -208,5 +209,10 @@ export async function setUserRole(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, role }),
   })
+  return res.json()
+}
+
+export async function getDashboardStats(): Promise<ApiResponse<DashboardStats>> {
+  const res = await fetch('/api/discrepancies/dashboard/stats')
   return res.json()
 }

@@ -53,6 +53,115 @@ export function getDiscrepancyStats(): { surplus: number; shortage: number; miss
   return row
 }
 
+export interface DashboardStats {
+  diffAmountDistribution: {
+    surplus: { count: number; totalAbsQty: number }
+    shortage: { count: number; totalAbsQty: number }
+    missed: { count: number; totalAbsQty: number }
+  }
+  dispositionStatusDistribution: Array<{
+    status: string
+    count: number
+    percentage: number
+  }>
+  recentApprovalRate: {
+    totalBatches: number
+    reviewedBatches: number
+    approvedBatches: number
+    reviewPassRate: number
+    approvalRate: number
+  }
+  totalBatches: number
+  totalLines: number
+  inventoryStats: {
+    skuCount: number
+    totalQuantity: number
+  }
+}
+
+export function getDashboardStats(): DashboardStats {
+  const db = getDb()
+
+  // 1. 盘盈盘亏金额分布（用差异数量绝对值作为"金额"代理指标）
+  const amountRow = db.prepare(
+    `SELECT
+      COALESCE(SUM(CASE WHEN diff_type = 'surplus' THEN 1 ELSE 0 END), 0) as surplus_count,
+      COALESCE(SUM(CASE WHEN diff_type = 'surplus' THEN ABS(diff_qty) ELSE 0 END), 0) as surplus_qty,
+      COALESCE(SUM(CASE WHEN diff_type = 'shortage' THEN 1 ELSE 0 END), 0) as shortage_count,
+      COALESCE(SUM(CASE WHEN diff_type = 'shortage' THEN ABS(diff_qty) ELSE 0 END), 0) as shortage_qty,
+      COALESCE(SUM(CASE WHEN diff_type = 'missed' THEN 1 ELSE 0 END), 0) as missed_count,
+      COALESCE(SUM(CASE WHEN diff_type = 'missed' THEN ABS(diff_qty) ELSE 0 END), 0) as missed_qty
+    FROM discrepancy_line`
+  ).get() as {
+    surplus_count: number; surplus_qty: number
+    shortage_count: number; shortage_qty: number
+    missed_count: number; missed_qty: number
+  }
+
+  // 2. 各处置状态占比
+  const dispRows = db.prepare(
+    `SELECT status, COUNT(*) as cnt FROM disposition GROUP BY status ORDER BY cnt DESC`
+  ).all() as Array<{ status: string; cnt: number }>
+
+  const totalDisp = dispRows.reduce((s, r) => s + r.cnt, 0)
+  const dispositionStatusDistribution = dispRows.map(r => ({
+    status: r.status,
+    count: r.cnt,
+    percentage: totalDisp > 0 ? Math.round((r.cnt / totalDisp) * 10000) / 100 : 0
+  }))
+
+  // 如果没有任何记录，补一个pending的0值
+  if (dispositionStatusDistribution.length === 0) {
+    dispositionStatusDistribution.push({ status: 'pending', count: 0, percentage: 0 })
+  }
+
+  // 3. 最近批次审批通过率（取最近10个批次）
+  const recentBatches = db.prepare(
+    `SELECT status FROM discrepancy_batch ORDER BY created_at DESC LIMIT 10`
+  ).all() as Array<{ status: string }>
+
+  const totalBatches = recentBatches.length
+  const reviewedBatches = recentBatches.filter(b => ['reviewed', 'approved', 'rolled_back'].includes(b.status)).length
+  const approvedBatches = recentBatches.filter(b => ['approved', 'rolled_back'].includes(b.status)).length
+  const reviewPassRate = reviewedBatches > 0
+    ? Math.round((reviewedBatches / (totalBatches > 0 ? totalBatches : 1)) * 10000) / 100
+    : 0
+  const approvalRate = totalBatches > 0
+    ? Math.round((approvedBatches / totalBatches) * 10000) / 100
+    : 0
+
+  // 4. 总体统计
+  const totalBatchesAll = (db.prepare('SELECT COUNT(*) as cnt FROM discrepancy_batch').get() as { cnt: number }).cnt
+  const totalLines = (db.prepare('SELECT COUNT(*) as cnt FROM discrepancy_line').get() as { cnt: number }).cnt
+
+  // 5. 库存统计
+  const invRow = db.prepare(
+    `SELECT COUNT(*) as sku_count, COALESCE(SUM(quantity), 0) as total_qty FROM current_inventory`
+  ).get() as { sku_count: number; total_qty: number }
+
+  return {
+    diffAmountDistribution: {
+      surplus: { count: amountRow.surplus_count, totalAbsQty: amountRow.surplus_qty },
+      shortage: { count: amountRow.shortage_count, totalAbsQty: amountRow.shortage_qty },
+      missed: { count: amountRow.missed_count, totalAbsQty: amountRow.missed_qty },
+    },
+    dispositionStatusDistribution,
+    recentApprovalRate: {
+      totalBatches,
+      reviewedBatches,
+      approvedBatches,
+      reviewPassRate,
+      approvalRate,
+    },
+    totalBatches: totalBatchesAll,
+    totalLines,
+    inventoryStats: {
+      skuCount: invRow.sku_count,
+      totalQuantity: invRow.total_qty,
+    },
+  }
+}
+
 export function calculateDiscrepancy(createdBy: string): DiscrepancyBatchWithLines {
   const db = getDb()
 

@@ -41,12 +41,24 @@ export default function ImportPage() {
     try {
       const res = await importBookInventory(bookFile, operator)
       if (res.success && res.data) {
-        addToast('success', `账面库存导入成功，批次号：${res.data.batchNo}，共 ${res.data.count} 条`)
+        let msg = `账面库存导入成功，批次号：${res.data.batchNo}，共 ${res.data.count} 条`
+        if (res.data.warning) {
+          msg += `（${res.data.warning}）`
+        }
+        addToast(res.data.warning ? 'info' : 'success', msg)
         setBookFile(null)
         if (bookInputRef.current) bookInputRef.current.value = ''
         await loadBookData()
       } else {
-        addToast('error', res.error || '导入失败')
+        let errMsg = res.error || '导入失败'
+        if (res.details && typeof res.details === 'object') {
+          const d = res.details as { invalidQuantityRows?: Array<{row: number; value: string}>; skippedEmptySkuCount?: number }
+          if (d.invalidQuantityRows && d.invalidQuantityRows.length > 0) {
+            const rows = d.invalidQuantityRows.map(r => `第${r.row}行`).join('、')
+            errMsg += `（问题行：${rows}）`
+          }
+        }
+        addToast('error', errMsg)
       }
     } catch {
       addToast('error', '网络错误，导入失败')
@@ -61,12 +73,24 @@ export default function ImportPage() {
     try {
       const res = await importPhysicalInventory(physicalFile, operator)
       if (res.success && res.data) {
-        addToast('success', `实盘数据导入成功，批次号：${res.data.batchNo}，共 ${res.data.count} 条`)
+        let msg = `实盘数据导入成功，批次号：${res.data.batchNo}，共 ${res.data.count} 条`
+        if (res.data.warning) {
+          msg += `（${res.data.warning}）`
+        }
+        addToast(res.data.warning ? 'info' : 'success', msg)
         setPhysicalFile(null)
         if (physicalInputRef.current) physicalInputRef.current.value = ''
         await loadPhysicalData()
       } else {
-        addToast('error', res.error || '导入失败')
+        let errMsg = res.error || '导入失败'
+        if (res.details && typeof res.details === 'object') {
+          const d = res.details as { invalidQuantityRows?: Array<{row: number; value: string}>; skippedEmptySkuCount?: number }
+          if (d.invalidQuantityRows && d.invalidQuantityRows.length > 0) {
+            const rows = d.invalidQuantityRows.map(r => `第${r.row}行`).join('、')
+            errMsg += `（问题行：${rows}）`
+          }
+        }
+        addToast('error', errMsg)
       }
     } catch {
       addToast('error', '网络错误，导入失败')

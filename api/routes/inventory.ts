@@ -52,19 +52,64 @@ router.post(
       }
 
       const items = parsed.data as Array<{ sku: string; name: string; quantity: string; unit: string; location: string }>
-      const mapped = items.map(item => ({
-        sku: item.sku?.trim() || '',
-        name: item.name?.trim() || '',
-        quantity: parseInt(item.quantity, 10) || 0,
-        unit: item.unit?.trim() || '',
-        location: item.location?.trim() || '',
-      }))
+
+      const validItems: Array<{ sku: string; name: string; quantity: number; unit: string; location: string }> = []
+      const skippedEmptySkuRows: number[] = []
+      const invalidQuantityRows: Array<{ row: number; value: string }> = []
+
+      items.forEach((item, idx) => {
+        const rowNumber = idx + 2 // 1-based, header is row 1
+        const sku = (item.sku ?? '').trim()
+
+        if (!sku) {
+          skippedEmptySkuRows.push(rowNumber)
+          return
+        }
+
+        const qtyStr = (item.quantity ?? '').trim()
+        if (qtyStr === '' || isNaN(Number(qtyStr)) || !Number.isInteger(Number(qtyStr))) {
+          invalidQuantityRows.push({ row: rowNumber, value: qtyStr })
+          return
+        }
+        const qty = parseInt(qtyStr, 10)
+        if (qty < 0) {
+          invalidQuantityRows.push({ row: rowNumber, value: qtyStr })
+          return
+        }
+
+        validItems.push({
+          sku,
+          name: (item.name ?? '').trim(),
+          quantity: qty,
+          unit: (item.unit ?? '').trim(),
+          location: (item.location ?? '').trim(),
+        })
+      })
+
+      if (invalidQuantityRows.length > 0) {
+        const details = invalidQuantityRows.map(r => `第${r.row}行(value="${r.value}")`).join(', ')
+        res.status(400).json({
+          success: false,
+          error: `数量字段存在非法值: ${details}。请填写非负整数。`,
+          details: { invalidQuantityRows, skippedEmptySkuCount: skippedEmptySkuRows.length, skippedEmptySkuRows }
+        })
+        return
+      }
 
       const importedBy = (req.body.importedBy as string) || ''
       const batchNo = 'BOOK-' + Date.now()
 
-      importBookInventory(mapped, batchNo, importedBy)
-      res.json({ success: true, data: { batchNo, count: mapped.length } })
+      importBookInventory(validItems, batchNo, importedBy)
+      res.json({
+        success: true,
+        data: {
+          batchNo,
+          count: validItems.length,
+          skippedEmptySkuCount: skippedEmptySkuRows.length,
+          skippedEmptySkuRows,
+          warning: skippedEmptySkuRows.length > 0 ? `已跳过 ${skippedEmptySkuRows.length} 行货品编码为空的记录` : undefined
+        }
+      })
     } catch (err) {
       res.status(500).json({ success: false, error: (err as Error).message })
     }
@@ -91,20 +136,65 @@ router.post(
       }
 
       const items = parsed.data as Array<{ sku: string; name: string; quantity: string; unit: string; location: string; operator: string }>
-      const mapped = items.map(item => ({
-        sku: item.sku?.trim() || '',
-        name: item.name?.trim() || '',
-        quantity: parseInt(item.quantity, 10) || 0,
-        unit: item.unit?.trim() || '',
-        location: item.location?.trim() || '',
-        operator: item.operator?.trim() || '',
-      }))
+
+      const validItems: Array<{ sku: string; name: string; quantity: number; unit: string; location: string; operator: string }> = []
+      const skippedEmptySkuRows: number[] = []
+      const invalidQuantityRows: Array<{ row: number; value: string }> = []
+
+      items.forEach((item, idx) => {
+        const rowNumber = idx + 2 // 1-based, header is row 1
+        const sku = (item.sku ?? '').trim()
+
+        if (!sku) {
+          skippedEmptySkuRows.push(rowNumber)
+          return
+        }
+
+        const qtyStr = (item.quantity ?? '').trim()
+        if (qtyStr === '' || isNaN(Number(qtyStr)) || !Number.isInteger(Number(qtyStr))) {
+          invalidQuantityRows.push({ row: rowNumber, value: qtyStr })
+          return
+        }
+        const qty = parseInt(qtyStr, 10)
+        if (qty < 0) {
+          invalidQuantityRows.push({ row: rowNumber, value: qtyStr })
+          return
+        }
+
+        validItems.push({
+          sku,
+          name: (item.name ?? '').trim(),
+          quantity: qty,
+          unit: (item.unit ?? '').trim(),
+          location: (item.location ?? '').trim(),
+          operator: (item.operator ?? '').trim(),
+        })
+      })
+
+      if (invalidQuantityRows.length > 0) {
+        const details = invalidQuantityRows.map(r => `第${r.row}行(value="${r.value}")`).join(', ')
+        res.status(400).json({
+          success: false,
+          error: `数量字段存在非法值: ${details}。请填写非负整数。`,
+          details: { invalidQuantityRows, skippedEmptySkuCount: skippedEmptySkuRows.length, skippedEmptySkuRows }
+        })
+        return
+      }
 
       const importedBy = (req.body.importedBy as string) || ''
       const batchNo = 'PHYSICAL-' + Date.now()
 
-      importPhysicalInventory(mapped, batchNo, importedBy)
-      res.json({ success: true, data: { batchNo, count: mapped.length } })
+      importPhysicalInventory(validItems, batchNo, importedBy)
+      res.json({
+        success: true,
+        data: {
+          batchNo,
+          count: validItems.length,
+          skippedEmptySkuCount: skippedEmptySkuRows.length,
+          skippedEmptySkuRows,
+          warning: skippedEmptySkuRows.length > 0 ? `已跳过 ${skippedEmptySkuRows.length} 行货品编码为空的记录` : undefined
+        }
+      })
     } catch (err) {
       res.status(400).json({ success: false, error: (err as Error).message })
     }

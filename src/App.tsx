@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import Layout from '@/components/Layout'
+import DashboardPage from '@/pages/DashboardPage'
 import ImportPage from '@/pages/ImportPage'
 import DiscrepancyListPage from '@/pages/DiscrepancyListPage'
 import DiscrepancyDetailPage from '@/pages/DiscrepancyDetailPage'
@@ -11,7 +12,8 @@ export default function App() {
     <Router>
       <Routes>
         <Route element={<Layout />}>
-          <Route path="/" element={<Navigate to="/import" replace />} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/import" element={<ImportPage />} />
           <Route path="/discrepancies" element={<DiscrepancyListPage />} />
           <Route path="/discrepancy/:id" element={<DiscrepancyDetailPage />} />

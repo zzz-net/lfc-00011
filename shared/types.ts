@@ -129,4 +129,32 @@ export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
+  details?: unknown;
+  warning?: string;
+}
+
+export interface DashboardStats {
+  diffAmountDistribution: {
+    surplus: { count: number; totalAbsQty: number }
+    shortage: { count: number; totalAbsQty: number }
+    missed: { count: number; totalAbsQty: number }
+  }
+  dispositionStatusDistribution: Array<{
+    status: string
+    count: number
+    percentage: number
+  }>
+  recentApprovalRate: {
+    totalBatches: number
+    reviewedBatches: number
+    approvedBatches: number
+    reviewPassRate: number
+    approvalRate: number
+  }
+  totalBatches: number
+  totalLines: number
+  inventoryStats: {
+    skuCount: number
+    totalQuantity: number
+  }
 }
